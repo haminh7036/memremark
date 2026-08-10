@@ -16,3 +16,7 @@ Mỗi lần cần thảo luận hay gì thi phải nói lại toàn bộ lịch 
 ## Mục tiêu:
 **Tự động** lưu trữ, trích xuất và duy trì liền mạch cuộc trò chuyện và kiến thức được đúc kết lại qua toàn bộ các thiết bị mà không bị ngắt quãng.
 
+## Trạng thái
+Chia làm 2 phần: **Core Engine** (trên 1 máy) làm trước, **Sync Layer** (đồng bộ đa thiết bị) làm sau.
+Đang ở giai đoạn thiết kế Core Engine — xem `docs/superpowers/specs/2026-08-10-core-engine-design.md` (bản tiếng Việt: `2026-08-10-core-engine-design-vi.md`).
+
