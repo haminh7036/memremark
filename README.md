@@ -1,4 +1,5 @@
-# Ứng dụng duy trì ngữ cảnh liền mạch giữa các phiên làm việc bằng cách tự động ghi lại các quan sát về việc sử dụng công cụ, tạo ra các bản tóm tắt ngữ nghĩa và cung cấp chúng cho các phiên làm việc sau này. Điều này cho phép Antigravity CLI / Claude Code duy trì tính liên tục của kiến thức về các dự án ngay cả sau khi các phiên làm việc kết thúc hoặc kết nối lại.
+# MemRemark
+Ứng dụng duy trì ngữ cảnh liền mạch giữa các phiên làm việc bằng cách tự động ghi lại các quan sát về việc sử dụng công cụ, tạo ra các bản tóm tắt ngữ nghĩa và cung cấp chúng cho các phiên làm việc sau này. Điều này cho phép Antigravity CLI / Claude Code duy trì tính liên tục của kiến thức về các dự án ngay cả sau khi các phiên làm việc kết thúc hoặc kết nối lại.
 
 ## Tech stack
 - Golang cho hiệu năng cao
