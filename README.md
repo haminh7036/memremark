@@ -3,8 +3,7 @@
 
 ## Tech stack
 - Golang cho hiệu năng cao
-- Lưu trữ: Sqlite (mặc định). PostgreSQL, MySQL, hoặc vector database ...
-- ...
+- Lưu trữ: Sqlite (đã chốt cho Core Engine v1, xem spec). Cân nhắc PostgreSQL/MySQL/vector database sau, nếu Sync Layer hoặc semantic search thực sự cần.
 
 ## Ý tưởng
 Tham khảo từ 2 repo này để xây dựng dự án: [Claude Mem](https://github.com/thedotmack/claude-mem), [Mempalace](https://github.com/mempalace/mempalace)
@@ -16,7 +15,7 @@ Mỗi lần cần thảo luận hay gì thi phải nói lại toàn bộ lịch 
 ## Mục tiêu:
 **Tự động** lưu trữ, trích xuất và duy trì liền mạch cuộc trò chuyện và kiến thức được đúc kết lại qua toàn bộ các thiết bị mà không bị ngắt quãng.
 
-## Trạng thái
+## Tiến độ
 Chia làm 2 phần: **Core Engine** (trên 1 máy) làm trước, **Sync Layer** (đồng bộ đa thiết bị) làm sau.
 Đang ở giai đoạn thiết kế Core Engine — xem `docs/superpowers/specs/2026-08-10-core-engine-design.md` (bản tiếng Việt: `2026-08-10-core-engine-design-vi.md`).
 
