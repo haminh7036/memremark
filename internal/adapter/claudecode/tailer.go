@@ -55,7 +55,9 @@ func (t *Tailer) readNewLinesFrom(path string, reader io.Reader, offset int64) (
 		}
 		if err != nil {
 			if !errors.Is(err, io.EOF) {
-				// Real error, not EOF — propagate it
+				// Real error, not EOF — persist offset for lines we did read
+				// before propagating the error
+				t.offsets[path] = consumed
 				return lines, err
 			}
 			break // EOF — normal end of file, might have incomplete line

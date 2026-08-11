@@ -153,3 +153,60 @@ func TestReadNewLinesReturnsNonEOFErrors(t *testing.T) {
 		t.Fatalf("expected non-EOF error, got io.EOF")
 	}
 }
+
+func TestReadNewLinesPersistsOffsetOnError(t *testing.T) {
+	tailer := NewTailer()
+
+	// First call: reads line1 successfully, then hits an error
+	reader1 := &sequentialReader{
+		calls: []struct {
+			data []byte
+			err  error
+		}{
+			{[]byte("line1\n"), nil},
+			{[]byte(""), fmt.Errorf("simulated I/O error")},
+		},
+	}
+
+	lines1, err1 := tailer.readNewLinesFrom("test.jsonl", reader1, 0)
+	if len(lines1) != 1 || string(lines1[0]) != "line1" {
+		t.Fatalf("first call: expected [line1], got %v", linesToStrings(lines1))
+	}
+	if err1 == nil {
+		t.Fatalf("first call: expected error, got nil")
+	}
+
+	// Check that the offset was persisted even though an error occurred
+	// "line1\n" is 6 bytes, so the offset should be 6
+	expectedOffset := int64(6)
+	actualOffset := tailer.offsets["test.jsonl"]
+	if actualOffset != expectedOffset {
+		t.Fatalf("offset not persisted after error: got %d, expected %d", actualOffset, expectedOffset)
+	}
+
+	// Second call: should start from offset 6, not re-read line1
+	// This simulates the daemon calling ReadNewLines again after the error
+	reader2 := &sequentialReader{
+		calls: []struct {
+			data []byte
+			err  error
+		}{
+			{[]byte("line2\n"), nil},
+		},
+	}
+
+	lines2, err2 := tailer.readNewLinesFrom("test.jsonl", reader2, actualOffset)
+	if len(lines2) != 1 || string(lines2[0]) != "line2" {
+		t.Fatalf("second call: expected [line2], got %v", linesToStrings(lines2))
+	}
+	if err2 != nil {
+		t.Fatalf("second call: expected no error, got %v", err2)
+	}
+
+	// Verify offset was updated correctly after successful read
+	expectedOffset2 := int64(12) // 6 (from before) + 6 ("line2\n")
+	actualOffset2 := tailer.offsets["test.jsonl"]
+	if actualOffset2 != expectedOffset2 {
+		t.Fatalf("offset not updated correctly: got %d, expected %d", actualOffset2, expectedOffset2)
+	}
+}
