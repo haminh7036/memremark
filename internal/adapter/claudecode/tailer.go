@@ -1,0 +1,72 @@
+package claudecode
+
+import (
+	"bufio"
+	"io"
+	"os"
+	"path/filepath"
+)
+
+// DiscoverTranscriptFiles returns every Claude Code transcript file
+// (*.jsonl) found under root, typically $HOME/.claude/projects. A
+// missing root is not an error -- it simply means no transcripts exist
+// yet.
+func DiscoverTranscriptFiles(root string) ([]string, error) {
+	var files []string
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil // skip unreadable entries rather than aborting the whole walk
+		}
+		if !d.IsDir() && filepath.Ext(path) == ".jsonl" {
+			files = append(files, path)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return files, nil
+}
+
+// Tailer reads only the bytes appended to each transcript file since the
+// last call for that path, so a poll cycle never re-processes old lines.
+type Tailer struct {
+	offsets map[string]int64
+}
+
+// NewTailer returns a Tailer with no prior read history.
+func NewTailer() *Tailer {
+	return &Tailer{offsets: make(map[string]int64)}
+}
+
+// ReadNewLines returns the complete lines appended to path since the
+// last call for that path. An incomplete trailing line (the file is
+// still being written) is left unconsumed for the next call.
+func (t *Tailer) ReadNewLines(path string) ([][]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	offset := t.offsets[path]
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+		return nil, err
+	}
+
+	var lines [][]byte
+	reader := bufio.NewReader(f)
+	consumed := offset
+	for {
+		line, err := reader.ReadBytes('\n')
+		if len(line) > 0 && line[len(line)-1] == '\n' {
+			lines = append(lines, line[:len(line)-1])
+			consumed += int64(len(line))
+		}
+		if err != nil {
+			break // EOF, or a partial trailing line with no newline yet
+		}
+	}
+	t.offsets[path] = consumed
+	return lines, nil
+}
