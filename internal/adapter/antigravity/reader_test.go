@@ -58,6 +58,35 @@ func createTestSummariesDB(t *testing.T, path, conversationID, workspaceURIs, la
 	}
 }
 
+// createTestSummariesDBDatetimeColumn mirrors createTestSummariesDB but
+// declares last_modified_time with SQLite type affinity `datetime`, matching
+// the real Antigravity CLI schema. modernc.org/sqlite reformats values read
+// back from a datetime-affinity column into RFC3339, unlike a text-affinity
+// column which round-trips the string as-is.
+func createTestSummariesDBDatetimeColumn(t *testing.T, path, conversationID, workspaceURIs, lastModified string) {
+	t.Helper()
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open test db: %v", err)
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`CREATE TABLE conversation_summaries (
+		conversation_id text, workspace_uris text NOT NULL DEFAULT "",
+		last_modified_time datetime NOT NULL, PRIMARY KEY (conversation_id)
+	)`)
+	if err != nil {
+		t.Fatalf("create conversation_summaries table: %v", err)
+	}
+	_, err = db.Exec(
+		`INSERT INTO conversation_summaries (conversation_id, workspace_uris, last_modified_time) VALUES (?, ?, ?)`,
+		conversationID, workspaceURIs, lastModified,
+	)
+	if err != nil {
+		t.Fatalf("insert conversation summary: %v", err)
+	}
+}
+
 func buildProtobufPromptBlob(text string) []byte {
 	var buf []byte
 	buf = protowire.AppendTag(buf, 1, protowire.BytesType)
@@ -139,6 +168,29 @@ func TestListConversationsParsesRealTimestampFormat(t *testing.T) {
 	}
 	if convs[0].WorkspaceURIs != "/home/minh/personal/memremark" {
 		t.Fatalf("unexpected workspace: %q", convs[0].WorkspaceURIs)
+	}
+	want := time.Date(2026, 7, 17, 3, 45, 48, 875161831, time.UTC)
+	if !convs[0].LastModified.Equal(want) {
+		t.Fatalf("expected LastModified %v, got %v", want, convs[0].LastModified)
+	}
+}
+
+// TestListConversationsParsesDatetimeAffinityColumn reproduces the real
+// Antigravity CLI schema, where conversation_summaries.last_modified_time
+// has SQLite type affinity `datetime` (not `text`). modernc.org/sqlite
+// reformats values it reads back from such a column into RFC3339, so
+// parseSQLiteDatetime must accept that shape too, not just the
+// space-separated shape the text-affinity test above exercises.
+func TestListConversationsParsesDatetimeAffinityColumn(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "conversation_summaries.db")
+	createTestSummariesDBDatetimeColumn(t, dbPath, "conv-1", "/home/minh/personal/memremark", "2026-07-17 03:45:48.875161831+00:00")
+
+	convs, err := ListConversations(dbPath)
+	if err != nil {
+		t.Fatalf("ListConversations: %v", err)
+	}
+	if len(convs) != 1 {
+		t.Fatalf("expected 1 conversation, got %d", len(convs))
 	}
 	want := time.Date(2026, 7, 17, 3, 45, 48, 875161831, time.UTC)
 	if !convs[0].LastModified.Equal(want) {

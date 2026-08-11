@@ -39,7 +39,16 @@ type ConversationInfo struct {
 	LastModified  time.Time
 }
 
+// parseSQLiteDatetime parses a last_modified_time value read back from
+// SQLite. Which shape we get depends on the column's declared type
+// affinity: a `text`-affinity column round-trips the space-separated string
+// as stored, while modernc.org/sqlite reformats values from a
+// `datetime`-affinity column (the real Antigravity CLI schema) into
+// RFC3339. Both are tried since we don't control the driver's behavior.
 func parseSQLiteDatetime(s string) (time.Time, error) {
+	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+		return t, nil
+	}
 	return time.Parse("2006-01-02 15:04:05.999999999Z07:00", s)
 }
 
