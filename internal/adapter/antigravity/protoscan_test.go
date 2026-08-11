@@ -68,18 +68,24 @@ func TestExtractStringsOnTruncatedInputStopsGracefully(t *testing.T) {
 }
 
 func TestExtractStringsDeeplyNestedDoesNotStackOverflow(t *testing.T) {
-	// Build a chain of 250 nested empty length-delimited fields.
-	// Each empty field fails isMeaningfulText, forcing recursion.
-	// With a depth limit of 100, this should stop gracefully and not stack overflow.
+	// Build a genuinely nested chain: field N contains encoded field N-1.
+	// This forces the scanner to recurse through all levels to reach the bottom.
+	// With maxRecursionDepth=100, a 250-level chain should stop gracefully.
 	depth := 250
-	var buf []byte
+
+	// Build from innermost out: start with empty, wrap in BytesType, repeat.
+	var innermost []byte // empty innermost message
+
+	nested := innermost
 	for i := 0; i < depth; i++ {
-		buf = protowire.AppendTag(buf, 1, protowire.BytesType)
-		buf = protowire.AppendBytes(buf, []byte{})
+		var wrapper []byte
+		wrapper = protowire.AppendTag(wrapper, 1, protowire.BytesType)
+		wrapper = protowire.AppendBytes(wrapper, nested)
+		nested = wrapper
 	}
 
-	got := ExtractStrings(buf) // must not panic or stack overflow
+	got := ExtractStrings(nested) // must not panic or stack overflow
 	if len(got) != 0 {
-		t.Fatalf("expected no strings from deeply nested empty fields, got %v", got)
+		t.Fatalf("expected no strings from deeply nested messages, got %v", got)
 	}
 }
