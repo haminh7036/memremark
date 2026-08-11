@@ -63,79 +63,62 @@ func NewParser() *Parser {
 // (ok=false, err=nil) since a mid-write transcript can contain a
 // truncated final line. If a single line contains multiple tool_results,
 // the first is returned and the rest are buffered to drain on subsequent calls.
+// The buffer is checked *after* the incoming line is fully parsed, so new
+// tool_uses are never discarded even when the buffer is non-empty.
 func (p *Parser) Feed(line []byte) (obs observation.Observation, ok bool, err error) {
-	// Drain buffered observations first (from multi-result lines)
+	// Always parse the incoming line first, even if buffer is non-empty
+	if len(line) > 0 {
+		var ev rawEvent
+		if err := json.Unmarshal(line, &ev); err == nil && ev.Message != nil && len(ev.Message.Content) > 0 {
+			ts, _ := time.Parse(time.RFC3339, ev.Timestamp)
+
+			var blocks []rawContentBlock
+			if err := json.Unmarshal(ev.Message.Content, &blocks); err == nil {
+				// Successfully parsed content as array of blocks
+				switch ev.Type {
+				case "assistant":
+					for _, b := range blocks {
+						if b.Type != "tool_use" {
+							continue
+						}
+						p.pending[b.ID] = pendingToolUse{
+							name:      b.Name,
+							input:     string(b.Input),
+							sessionID: ev.SessionID,
+							cwd:       ev.CWD,
+							timestamp: ts,
+						}
+					}
+
+				case "user":
+					// Collect all matching tool_results from this line
+					for _, b := range blocks {
+						if b.Type != "tool_result" {
+							continue
+						}
+						pend, found := p.pending[b.ToolUseID]
+						if !found {
+							continue
+						}
+						delete(p.pending, b.ToolUseID)
+						p.buffer = append(p.buffer, observation.Observation{
+							WingPath:  pend.cwd,
+							SessionID: pend.sessionID,
+							ToolName:  pend.name,
+							Content:   fmt.Sprintf("input: %s\nresult: %s", pend.input, resultContentText(b.Content)),
+							Timestamp: pend.timestamp,
+						})
+					}
+				}
+			}
+		}
+	}
+
+	// After parsing the line, check the buffer
 	if len(p.buffer) > 0 {
 		obs = p.buffer[0]
 		p.buffer = p.buffer[1:]
 		return obs, true, nil
-	}
-
-	if len(line) == 0 {
-		return observation.Observation{}, false, nil
-	}
-
-	var ev rawEvent
-	if err := json.Unmarshal(line, &ev); err != nil {
-		return observation.Observation{}, false, nil
-	}
-	if ev.Message == nil || len(ev.Message.Content) == 0 {
-		return observation.Observation{}, false, nil
-	}
-
-	ts, _ := time.Parse(time.RFC3339, ev.Timestamp)
-
-	var blocks []rawContentBlock
-	if err := json.Unmarshal(ev.Message.Content, &blocks); err != nil {
-		// content is a plain string (an ordinary text turn) -- nothing to pair.
-		return observation.Observation{}, false, nil
-	}
-
-	switch ev.Type {
-	case "assistant":
-		for _, b := range blocks {
-			if b.Type != "tool_use" {
-				continue
-			}
-			p.pending[b.ID] = pendingToolUse{
-				name:      b.Name,
-				input:     string(b.Input),
-				sessionID: ev.SessionID,
-				cwd:       ev.CWD,
-				timestamp: ts,
-			}
-		}
-		return observation.Observation{}, false, nil
-
-	case "user":
-		// Collect all matching tool_results from this line
-		var completed []observation.Observation
-		for _, b := range blocks {
-			if b.Type != "tool_result" {
-				continue
-			}
-			pend, found := p.pending[b.ToolUseID]
-			if !found {
-				continue
-			}
-			delete(p.pending, b.ToolUseID)
-			completed = append(completed, observation.Observation{
-				WingPath:  pend.cwd,
-				SessionID: pend.sessionID,
-				ToolName:  pend.name,
-				Content:   fmt.Sprintf("input: %s\nresult: %s", pend.input, resultContentText(b.Content)),
-				Timestamp: pend.timestamp,
-			})
-		}
-		if len(completed) > 0 {
-			// Return first, buffer the rest
-			obs = completed[0]
-			if len(completed) > 1 {
-				p.buffer = append(p.buffer, completed[1:]...)
-			}
-			return obs, true, nil
-		}
-		return observation.Observation{}, false, nil
 	}
 
 	return observation.Observation{}, false, nil

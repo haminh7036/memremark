@@ -163,3 +163,70 @@ func TestParserIgnoresOrphanToolResult(t *testing.T) {
 		t.Fatalf("expected 0 pending entries, got %d", len(p.pending))
 	}
 }
+
+func TestParserNewLineParsedEvenWhenBufferNonEmpty(t *testing.T) {
+	p := NewParser()
+
+	// Step 1: Feed assistant with two tool_uses (A, B)
+	line1 := `{"type":"assistant","sessionId":"sess-1","cwd":"/tmp","timestamp":"2026-08-10T10:00:00.000Z","message":{"content":[{"type":"tool_use","id":"A","name":"Read","input":{"file":"a.txt"}},{"type":"tool_use","id":"B","name":"Write","input":{"file":"b.txt"}}]}}`
+	obs, ok, err := p.Feed([]byte(line1))
+	if err != nil {
+		t.Fatalf("Feed line 1: %v", err)
+	}
+	if ok {
+		t.Fatalf("expected ok=false for assistant line")
+	}
+
+	// Step 2: Feed user with two matching results for A and B (leaves one buffered)
+	line2 := `{"type":"user","sessionId":"sess-1","cwd":"/tmp","timestamp":"2026-08-10T10:00:01.000Z","message":{"content":[{"type":"tool_result","tool_use_id":"A","content":"result A","is_error":false},{"type":"tool_result","tool_use_id":"B","content":"result B","is_error":false}]}}`
+	obs, ok, err = p.Feed([]byte(line2))
+	if err != nil {
+		t.Fatalf("Feed line 2: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected ok=true for first result")
+	}
+	firstToolName := obs.ToolName // Either Read or Write
+
+	// Step 3: Feed assistant with new tool_use C while buffer is non-empty
+	// This is the critical test: the buffer drain must NOT skip parsing this line
+	line3 := `{"type":"assistant","sessionId":"sess-1","cwd":"/tmp","timestamp":"2026-08-10T10:00:02.000Z","message":{"content":[{"type":"tool_use","id":"C","name":"Bash","input":{"command":"ls"}}]}}`
+	obs, ok, err = p.Feed([]byte(line3))
+	if err != nil {
+		t.Fatalf("Feed line 3: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected ok=true, should drain buffered second result")
+	}
+	// Should get the buffered result (the one not returned in step 2)
+	secondToolName := obs.ToolName
+	if secondToolName == firstToolName {
+		t.Fatalf("expected two different tool names from A and B, got %q twice", firstToolName)
+	}
+
+	// Critical check: C must be in pending, not lost
+	if len(p.pending) != 1 {
+		t.Fatalf("expected C to be pending after line 3, got %d pending entries", len(p.pending))
+	}
+	if _, hasC := p.pending["C"]; !hasC {
+		t.Fatalf("expected tool_use C in pending, but it's missing")
+	}
+
+	// Step 4: Feed C's matching result
+	line4 := `{"type":"user","sessionId":"sess-1","cwd":"/tmp","timestamp":"2026-08-10T10:00:03.000Z","message":{"content":[{"type":"tool_result","tool_use_id":"C","content":"result C","is_error":false}]}}`
+	obs, ok, err = p.Feed([]byte(line4))
+	if err != nil {
+		t.Fatalf("Feed line 4: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected ok=true for C's result")
+	}
+	if obs.ToolName != "Bash" {
+		t.Fatalf("expected ToolName=Bash for C's result, got %q", obs.ToolName)
+	}
+
+	// No more pending
+	if len(p.pending) != 0 {
+		t.Fatalf("expected all resolved, got %d pending", len(p.pending))
+	}
+}
