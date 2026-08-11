@@ -82,3 +82,30 @@ func TestBuildPromptIncludesObservationContent(t *testing.T) {
 		t.Fatalf("expected prompt to include observation content, got %q", prompt)
 	}
 }
+
+func TestSummarizeHandlesLeadingProseWithBracket(t *testing.T) {
+	// Leading prose contains a bracket (ref[1]) before the real JSON array
+	stub := stubInvoker{reply: `As shown in ref[1], here's the array: [{"hall":"fact","content":"use TypeScript"}]`}
+	obs := []observation.Observation{{ToolName: "Bash", Content: "ls"}}
+	items, err := Summarize(context.Background(), stub, obs)
+	if err != nil {
+		t.Fatalf("Summarize: %v", err)
+	}
+	if len(items) != 1 || items[0].Content != "use TypeScript" {
+		t.Fatalf("expected 1 item with content 'use TypeScript', got %+v", items)
+	}
+}
+
+func TestSummarizeHandlesTrailingProseWithBracket(t *testing.T) {
+	// Trailing prose contains a bracket (ref[2]) after the real JSON array closes
+	stub := stubInvoker{reply: `[{"hall":"discovery","content":"found a bug"}]
+Cool, right? See ref[2] for more details.`}
+	obs := []observation.Observation{{ToolName: "Bash", Content: "ls"}}
+	items, err := Summarize(context.Background(), stub, obs)
+	if err != nil {
+		t.Fatalf("Summarize: %v", err)
+	}
+	if len(items) != 1 || items[0].Content != "found a bug" {
+		t.Fatalf("expected 1 item with content 'found a bug', got %+v", items)
+	}
+}

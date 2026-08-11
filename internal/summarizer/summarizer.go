@@ -104,22 +104,30 @@ func buildPrompt(observations []observation.Observation) string {
 
 func parseSummaryItems(modelText string) ([]SummaryItem, error) {
 	text := strings.TrimSpace(modelText)
-	start := strings.Index(text, "[")
-	end := strings.LastIndex(text, "]")
-	if start == -1 || end == -1 || end < start {
-		return nil, fmt.Errorf("summarizer: no JSON array found in model reply: %q", truncate(text, 200))
+
+	// Try each '[' position in the text. The first one that successfully
+	// decodes a valid JSON array is the real array; this handles prose with
+	// stray brackets (e.g. "see ref[1]" or "ref[2]") before or after the array.
+	for i := 0; i < len(text); i++ {
+		if text[i] != '[' {
+			continue
+		}
+		var items []SummaryItem
+		decoder := json.NewDecoder(strings.NewReader(text[i:]))
+		if err := decoder.Decode(&items); err != nil {
+			// This '[' position didn't decode successfully, try the next one
+			continue
+		}
+		// Successfully decoded! Validate hall values and return.
+		for _, it := range items {
+			if !isValidHallForSummarizer(it.Hall) {
+				return nil, fmt.Errorf("summarizer: model returned invalid hall %q", it.Hall)
+			}
+		}
+		return items, nil
 	}
 
-	var items []SummaryItem
-	if err := json.Unmarshal([]byte(text[start:end+1]), &items); err != nil {
-		return nil, fmt.Errorf("summarizer: parse model reply as JSON: %w", err)
-	}
-	for _, it := range items {
-		if !isValidHallForSummarizer(it.Hall) {
-			return nil, fmt.Errorf("summarizer: model returned invalid hall %q", it.Hall)
-		}
-	}
-	return items, nil
+	return nil, fmt.Errorf("summarizer: no JSON array found in model reply: %q", truncate(text, 200))
 }
 
 func isValidHallForSummarizer(hall string) bool {
