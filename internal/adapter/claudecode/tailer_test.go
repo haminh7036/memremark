@@ -1,6 +1,8 @@
 package claudecode
 
 import (
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -96,5 +98,58 @@ func TestDiscoverTranscriptFilesOnMissingRootReturnsEmptyNoError(t *testing.T) {
 	}
 	if len(files) != 0 {
 		t.Fatalf("expected no files, got %v", files)
+	}
+}
+
+// sequentialReader returns specific data and errors in sequence, useful for
+// testing error handling without relying on actual file system I/O.
+type sequentialReader struct {
+	calls     []struct {
+		data []byte
+		err  error
+	}
+	callIndex int
+}
+
+func (s *sequentialReader) Read(p []byte) (int, error) {
+	if s.callIndex >= len(s.calls) {
+		return 0, io.EOF
+	}
+	call := s.calls[s.callIndex]
+	s.callIndex++
+	n := copy(p, call.data)
+	return n, call.err
+}
+
+func TestReadNewLinesReturnsNonEOFErrors(t *testing.T) {
+	tailer := NewTailer()
+
+	// Create a reader that returns:
+	// - First read: "line1\n" with no error
+	// - Second read: "line2" with a non-EOF error
+	// This simulates an I/O error occurring mid-stream.
+	reader := &sequentialReader{
+		calls: []struct {
+			data []byte
+			err  error
+		}{
+			{[]byte("line1\n"), nil},
+			{[]byte("line2"), fmt.Errorf("simulated I/O error")},
+		},
+	}
+
+	lines, err := tailer.readNewLinesFrom("test.jsonl", reader, 0)
+
+	// Should have gotten the first complete line
+	if len(lines) != 1 || string(lines[0]) != "line1" {
+		t.Fatalf("expected [line1], got %v", linesToStrings(lines))
+	}
+
+	// Should have gotten a non-EOF error
+	if err == nil {
+		t.Fatalf("expected a non-EOF error, got nil")
+	}
+	if err == io.EOF {
+		t.Fatalf("expected non-EOF error, got io.EOF")
 	}
 }
