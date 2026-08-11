@@ -9,6 +9,7 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite"
+	"google.golang.org/protobuf/encoding/protowire"
 
 	"github.com/haminh7036/memremark/internal/storage"
 )
@@ -38,6 +39,60 @@ func createEmptySummariesDB(t *testing.T, path string) {
 	)`)
 	if err != nil {
 		t.Fatalf("create conversation_summaries: %v", err)
+	}
+}
+
+// mustExecSQLite runs one statement against the SQLite database at path,
+// opening and closing a fresh connection for it. Used to seed and mutate
+// the small fixture databases these tests build by hand (conversation
+// summaries index, per-conversation steps tables).
+func mustExecSQLite(t *testing.T, path, query string, args ...any) {
+	t.Helper()
+	db := mustOpenSQLite(t, path)
+	defer db.Close()
+	if _, err := db.Exec(query, args...); err != nil {
+		t.Fatalf("exec %q on %s: %v", query, path, err)
+	}
+}
+
+// buildProtobufPromptBlob encodes text as a single length-delimited
+// protobuf field, matching the shape antigravity.ExtractStrings recovers
+// text from (see internal/adapter/antigravity/reader_test.go).
+func buildProtobufPromptBlob(text string) []byte {
+	var buf []byte
+	buf = protowire.AppendTag(buf, 1, protowire.BytesType)
+	buf = protowire.AppendString(buf, text)
+	return buf
+}
+
+// createSummariesDBWithConversation builds a conversation_summaries.db with
+// one row. last_modified_time is declared TEXT (matching
+// internal/adapter/antigravity/reader_test.go's fixture) rather than the
+// DATETIME type createEmptySummariesDB above uses: modernc.org/sqlite
+// auto-reformats DATETIME-affinity columns to RFC3339 ("...T...Z") on
+// read, which antigravity.parseSQLiteDatetime's space-separated layout
+// can't parse. createEmptySummariesDB never surfaces this because its
+// existing callers never insert a row into it; these tests need a real
+// row read back correctly, so they sidestep the quirk rather than fix
+// it -- that's a pre-existing antigravity-package concern out of scope
+// here (see task-10-report.md's Fix round 1 notes).
+func createSummariesDBWithConversation(t *testing.T, path, conversationID, workspaceURIs, lastModified string) {
+	t.Helper()
+	db := mustOpenSQLite(t, path)
+	defer db.Close()
+	_, err := db.Exec(`CREATE TABLE conversation_summaries (
+		conversation_id text, workspace_uris text NOT NULL DEFAULT "",
+		last_modified_time text NOT NULL, PRIMARY KEY (conversation_id)
+	)`)
+	if err != nil {
+		t.Fatalf("create conversation_summaries: %v", err)
+	}
+	_, err = db.Exec(
+		`INSERT INTO conversation_summaries (conversation_id, workspace_uris, last_modified_time) VALUES (?, ?, ?)`,
+		conversationID, workspaceURIs, lastModified,
+	)
+	if err != nil {
+		t.Fatalf("insert conversation summary: %v", err)
 	}
 }
 
@@ -134,5 +189,133 @@ func TestPollOnceSummarizesAfterSessionGoesIdle(t *testing.T) {
 	}
 	if summaries[0].Content != "listed the project files" {
 		t.Fatalf("unexpected summary content: %q", summaries[0].Content)
+	}
+}
+
+// TestPollOnceCapturesVerbatimFromAntigravityConversation exercises
+// pollAntigravity's success path end to end: a real conversation_summaries.db
+// row pointing at a real per-conversation steps db, read through
+// antigravity.ReadObservations, landing as a verbatim drawer under the
+// right wing/session -- the Antigravity-side mirror of
+// TestPollOnceCapturesVerbatimFromClaudeCodeTranscript above, which only
+// covered the Claude Code path.
+func TestPollOnceCapturesVerbatimFromAntigravityConversation(t *testing.T) {
+	dir := t.TempDir()
+	projectsRoot := filepath.Join(dir, "claude-projects") // no Claude Code transcripts in this test
+
+	store, err := storage.Open(filepath.Join(dir, "memremark.db"))
+	if err != nil {
+		t.Fatalf("storage.Open: %v", err)
+	}
+	defer store.Close()
+
+	antigravityDir := filepath.Join(dir, "antigravity")
+	if err := os.MkdirAll(filepath.Join(antigravityDir, "conversations"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	summariesDB := filepath.Join(antigravityDir, "conversation_summaries.db")
+	createSummariesDBWithConversation(t, summariesDB, "conv-1", "/tmp/agy-project", "2026-08-11 10:00:00.000000000+00:00")
+
+	conversationDB := filepath.Join(antigravityDir, "conversations", "conv-1.db")
+	mustExecSQLite(t, conversationDB, `CREATE TABLE steps (idx integer, step_payload blob)`)
+	mustExecSQLite(t, conversationDB, `INSERT INTO steps (idx, step_payload) VALUES (0, ?)`,
+		buildProtobufPromptBlob("investigated the failing build"))
+
+	d := New(store, projectsRoot, summariesDB, stubInvoker{reply: "[]"}, stubInvoker{reply: "[]"})
+	if err := d.PollOnce(context.Background(), time.Now()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+
+	wingID, err := store.GetOrCreateWing("/tmp/agy-project")
+	if err != nil {
+		t.Fatalf("GetOrCreateWing: %v", err)
+	}
+	verbatim, err := store.VerbatimSince(wingID, "conv-1", time.Unix(0, 0))
+	if err != nil {
+		t.Fatalf("VerbatimSince: %v", err)
+	}
+	if len(verbatim) != 1 {
+		t.Fatalf("expected 1 verbatim drawer from antigravity path, got %d", len(verbatim))
+	}
+	if verbatim[0].Content != "investigated the failing build" {
+		t.Fatalf("unexpected verbatim content: %q", verbatim[0].Content)
+	}
+}
+
+// TestPollOnceAntigravityErrorDoesNotAdvanceWatermark proves the guard
+// flagged by Task 8's code review: antigravity.ReadObservations can return
+// a non-nil error alongside a maxIdx that's already advanced past rows it
+// didn't return (a mid-scan failure after some rows were already
+// processed). The steps table below seeds two good rows (idx 0, 1) plus a
+// row whose idx is TEXT rather than INTEGER, which sorts after the
+// integers and makes rows.Scan fail once the query reaches it -- so
+// ReadObservations returns (nil, 1, err), exactly the shape the guard in
+// pollAntigravity has to handle correctly.
+func TestPollOnceAntigravityErrorDoesNotAdvanceWatermark(t *testing.T) {
+	dir := t.TempDir()
+	projectsRoot := filepath.Join(dir, "claude-projects")
+
+	store, err := storage.Open(filepath.Join(dir, "memremark.db"))
+	if err != nil {
+		t.Fatalf("storage.Open: %v", err)
+	}
+	defer store.Close()
+
+	antigravityDir := filepath.Join(dir, "antigravity")
+	if err := os.MkdirAll(filepath.Join(antigravityDir, "conversations"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	summariesDB := filepath.Join(antigravityDir, "conversation_summaries.db")
+	createSummariesDBWithConversation(t, summariesDB, "conv-err", "/tmp/agy-broken", "2026-08-11 10:00:00.000000000+00:00")
+
+	conversationDB := filepath.Join(antigravityDir, "conversations", "conv-err.db")
+	mustExecSQLite(t, conversationDB, `CREATE TABLE steps (idx integer, step_payload blob)`)
+	mustExecSQLite(t, conversationDB, `INSERT INTO steps (idx, step_payload) VALUES (0, ?)`,
+		buildProtobufPromptBlob("obs zero"))
+	mustExecSQLite(t, conversationDB, `INSERT INTO steps (idx, step_payload) VALUES (1, ?)`,
+		buildProtobufPromptBlob("obs one"))
+	mustExecSQLite(t, conversationDB, `INSERT INTO steps (idx, step_payload) VALUES ('bad-idx', ?)`,
+		buildProtobufPromptBlob("obs bad"))
+
+	d := New(store, projectsRoot, summariesDB, stubInvoker{reply: "[]"}, stubInvoker{reply: "[]"})
+
+	if err := d.PollOnce(context.Background(), time.Now()); err != nil {
+		t.Fatalf("first PollOnce: %v", err)
+	}
+
+	if idx, ok := d.antigravityLastIdx["conv-err"]; ok {
+		t.Fatalf("expected no watermark stored after a failing poll, got %d", idx)
+	}
+
+	wingID, err := store.GetOrCreateWing("/tmp/agy-broken")
+	if err != nil {
+		t.Fatalf("GetOrCreateWing: %v", err)
+	}
+	verbatim, err := store.VerbatimSince(wingID, "conv-err", time.Unix(0, 0))
+	if err != nil {
+		t.Fatalf("VerbatimSince: %v", err)
+	}
+	if len(verbatim) != 0 {
+		t.Fatalf("expected 0 verbatim drawers from the failing poll, got %d", len(verbatim))
+	}
+
+	// The underlying condition resolves (e.g. a later write finishes
+	// cleanly): drop the bad row so the next poll's query succeeds.
+	mustExecSQLite(t, conversationDB, `DELETE FROM steps WHERE typeof(idx) = 'text'`)
+
+	if err := d.PollOnce(context.Background(), time.Now().Add(time.Second)); err != nil {
+		t.Fatalf("second PollOnce: %v", err)
+	}
+
+	if idx, ok := d.antigravityLastIdx["conv-err"]; !ok || idx != 1 {
+		t.Fatalf("expected watermark 1 after the recovered poll, got %d (ok=%v)", idx, ok)
+	}
+
+	verbatim, err = store.VerbatimSince(wingID, "conv-err", time.Unix(0, 0))
+	if err != nil {
+		t.Fatalf("VerbatimSince after recovery: %v", err)
+	}
+	if len(verbatim) != 2 {
+		t.Fatalf("expected 2 verbatim drawers after the retried poll (no rows skipped), got %d", len(verbatim))
 	}
 }

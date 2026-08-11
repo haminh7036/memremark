@@ -151,12 +151,16 @@ func (d *Daemon) recordObservation(obs observation.Observation, invoker summariz
 	if err != nil {
 		return err
 	}
-	// Use the poll time rather than obs.Timestamp: Claude Code transcript lines
-	// aren't guaranteed to carry a parseable "timestamp" field (a zero-value
-	// time.Time would sort before the epoch and break VerbatimSince's
-	// created_at > since filter), and antigravity's ReadObservations already
-	// only supplies a coarse per-conversation last-modified time anyway.
-	if err := d.Store.InsertVerbatimDrawer(wingID, obs.SessionID, obs.ToolName, obs.Content, now); err != nil {
+	// Prefer the real per-event timestamp from the transcript; fall back to the
+	// poll time only when it's missing/unparseable (zero value). A zero
+	// time.Time sorts before the epoch and would otherwise break VerbatimSince's
+	// created_at > since filter, but discarding real timestamps unconditionally
+	// would collapse chronology for any backlog processed after daemon downtime.
+	createdAt := obs.Timestamp
+	if createdAt.IsZero() {
+		createdAt = now
+	}
+	if err := d.Store.InsertVerbatimDrawer(wingID, obs.SessionID, obs.ToolName, obs.Content, createdAt); err != nil {
 		return err
 	}
 	d.sessionWing[obs.SessionID] = wingID
