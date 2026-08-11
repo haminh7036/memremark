@@ -105,9 +105,13 @@ func buildPrompt(observations []observation.Observation) string {
 func parseSummaryItems(modelText string) ([]SummaryItem, error) {
 	text := strings.TrimSpace(modelText)
 
-	// Try each '[' position in the text. The first one that successfully
-	// decodes a valid JSON array is the real array; this handles prose with
-	// stray brackets (e.g. "see ref[1]" or "ref[2]") before or after the array.
+	// Try each '[' position in the text. Prefer a valid non-empty array, but fall
+	// back to an empty array if that's the only candidate. This correctly handles
+	// prose with stray brackets (e.g. "see ref[1]" or "ref[2]") AND junk arrays
+	// like [] or [{}] that appear before the real intended array.
+	var emptyArrayCandidate []SummaryItem
+	var lastValidationError error
+
 	for i := 0; i < len(text); i++ {
 		if text[i] != '[' {
 			continue
@@ -118,16 +122,50 @@ func parseSummaryItems(modelText string) ([]SummaryItem, error) {
 			// This '[' position didn't decode successfully, try the next one
 			continue
 		}
-		// Successfully decoded! Validate hall values and return.
-		for _, it := range items {
-			if !isValidHallForSummarizer(it.Hall) {
-				return nil, fmt.Errorf("summarizer: model returned invalid hall %q", it.Hall)
+
+		// Successfully decoded! Check if it's valid.
+		if len(items) == 0 {
+			// Empty array is a fallback candidate (legitimate "nothing to summarize")
+			// but keep looking in case there's a non-empty valid array later
+			if emptyArrayCandidate == nil {
+				emptyArrayCandidate = items
 			}
+			continue
 		}
+
+		// Non-empty array: validate hall values
+		validationErr := validateHallValues(items)
+		if validationErr != nil {
+			// This non-empty array has invalid hall values; keep looking
+			lastValidationError = validationErr
+			continue
+		}
+
+		// Non-empty array with all valid halls: this is what we want!
 		return items, nil
 	}
 
+	// No valid non-empty array found. Fall back to empty array if we have one.
+	if emptyArrayCandidate != nil {
+		return emptyArrayCandidate, nil
+	}
+
+	// No valid array at all. Return the last validation error if we have one,
+	// otherwise report that no JSON array was found.
+	if lastValidationError != nil {
+		return nil, lastValidationError
+	}
+
 	return nil, fmt.Errorf("summarizer: no JSON array found in model reply: %q", truncate(text, 200))
+}
+
+func validateHallValues(items []SummaryItem) error {
+	for _, it := range items {
+		if !isValidHallForSummarizer(it.Hall) {
+			return fmt.Errorf("summarizer: model returned invalid hall %q", it.Hall)
+		}
+	}
+	return nil
 }
 
 func isValidHallForSummarizer(hall string) bool {

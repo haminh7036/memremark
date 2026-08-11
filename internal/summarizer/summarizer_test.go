@@ -109,3 +109,31 @@ Cool, right? See ref[2] for more details.`}
 		t.Fatalf("expected 1 item with content 'found a bug', got %+v", items)
 	}
 }
+
+func TestSummarizeSkipsEmptyArrayInProseBeforeRealArray(t *testing.T) {
+	// Empty array [] in prose before the real non-empty array.
+	// Must skip the empty array and return the real array, not silently return empty result.
+	stub := stubInvoker{reply: `Previously I returned [] but now here's the real data: [{"hall":"fact","content":"real"}]`}
+	obs := []observation.Observation{{ToolName: "Bash", Content: "ls"}}
+	items, err := Summarize(context.Background(), stub, obs)
+	if err != nil {
+		t.Fatalf("Summarize: %v", err)
+	}
+	if len(items) != 1 || items[0].Content != "real" {
+		t.Fatalf("expected 1 item with content 'real', got %+v", items)
+	}
+}
+
+func TestSummarizeSkipsInvalidHallInProseBeforeRealArray(t *testing.T) {
+	// Invalid-hall content [{}] in prose before the real valid array.
+	// Must skip the invalid items and return the real array, not error on the junk.
+	stub := stubInvoker{reply: `Noise [{}] before real: [{"hall":"fact","content":"real"}]`}
+	obs := []observation.Observation{{ToolName: "Bash", Content: "ls"}}
+	items, err := Summarize(context.Background(), stub, obs)
+	if err != nil {
+		t.Fatalf("Summarize: %v", err)
+	}
+	if len(items) != 1 || items[0].Content != "real" {
+		t.Fatalf("expected 1 item with content 'real', got %+v", items)
+	}
+}
