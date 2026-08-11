@@ -41,22 +41,36 @@ type pendingToolUse struct {
 // Parser turns a Claude Code transcript's JSONL lines into Observations
 // by pairing each tool_use block with its matching tool_result. It is
 // stateful across calls to Feed since the two halves of a tool call
-// appear on different lines.
+// appear on different lines. When a single user-turn line contains multiple
+// tool_results, the first Observation is returned and the rest are buffered
+// to drain on subsequent Feed calls.
 type Parser struct {
 	pending map[string]pendingToolUse // keyed by tool_use id
+	buffer  []observation.Observation  // buffered observations from multi-result lines
 }
 
 // NewParser returns an empty Parser.
 func NewParser() *Parser {
-	return &Parser{pending: make(map[string]pendingToolUse)}
+	return &Parser{
+		pending: make(map[string]pendingToolUse),
+		buffer:  make([]observation.Observation, 0),
+	}
 }
 
 // Feed processes one JSONL line. It returns a completed Observation once
 // a matching tool_result closes out a previously seen tool_use;
 // otherwise ok is false. Malformed or empty lines are skipped
 // (ok=false, err=nil) since a mid-write transcript can contain a
-// truncated final line.
+// truncated final line. If a single line contains multiple tool_results,
+// the first is returned and the rest are buffered to drain on subsequent calls.
 func (p *Parser) Feed(line []byte) (obs observation.Observation, ok bool, err error) {
+	// Drain buffered observations first (from multi-result lines)
+	if len(p.buffer) > 0 {
+		obs = p.buffer[0]
+		p.buffer = p.buffer[1:]
+		return obs, true, nil
+	}
+
 	if len(line) == 0 {
 		return observation.Observation{}, false, nil
 	}
@@ -94,6 +108,8 @@ func (p *Parser) Feed(line []byte) (obs observation.Observation, ok bool, err er
 		return observation.Observation{}, false, nil
 
 	case "user":
+		// Collect all matching tool_results from this line
+		var completed []observation.Observation
 		for _, b := range blocks {
 			if b.Type != "tool_result" {
 				continue
@@ -103,13 +119,21 @@ func (p *Parser) Feed(line []byte) (obs observation.Observation, ok bool, err er
 				continue
 			}
 			delete(p.pending, b.ToolUseID)
-			return observation.Observation{
+			completed = append(completed, observation.Observation{
 				WingPath:  pend.cwd,
 				SessionID: pend.sessionID,
 				ToolName:  pend.name,
 				Content:   fmt.Sprintf("input: %s\nresult: %s", pend.input, resultContentText(b.Content)),
 				Timestamp: pend.timestamp,
-			}, true, nil
+			})
+		}
+		if len(completed) > 0 {
+			// Return first, buffer the rest
+			obs = completed[0]
+			if len(completed) > 1 {
+				p.buffer = append(p.buffer, completed[1:]...)
+			}
+			return obs, true, nil
 		}
 		return observation.Observation{}, false, nil
 	}

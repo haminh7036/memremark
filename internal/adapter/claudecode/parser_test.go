@@ -98,3 +98,68 @@ func TestParserLeavesUnmatchedToolUsePending(t *testing.T) {
 		t.Fatalf("expected 1 pending tool_use, got %d", len(p.pending))
 	}
 }
+
+func TestParserHandlesMultipleToolResultsInOneLine(t *testing.T) {
+	p := NewParser()
+
+	// Line 1: assistant with two tool_uses
+	line1 := `{"type":"assistant","sessionId":"sess-1","cwd":"/tmp","timestamp":"2026-08-10T10:00:00.000Z","message":{"content":[{"type":"tool_use","id":"id1","name":"Read","input":{"file":"a.txt"}},{"type":"tool_use","id":"id2","name":"Write","input":{"file":"b.txt"}}]}}`
+	obs, ok, err := p.Feed([]byte(line1))
+	if err != nil {
+		t.Fatalf("Feed line 1: %v", err)
+	}
+	if ok {
+		t.Fatalf("expected ok=false for assistant line, got true")
+	}
+
+	// Line 2: user with two matching tool_results
+	line2 := `{"type":"user","sessionId":"sess-1","cwd":"/tmp","timestamp":"2026-08-10T10:00:01.000Z","message":{"content":[{"type":"tool_result","tool_use_id":"id1","content":"file a","is_error":false},{"type":"tool_result","tool_use_id":"id2","content":"file b","is_error":false}]}}`
+	obs, ok, err = p.Feed([]byte(line2))
+	if err != nil {
+		t.Fatalf("Feed line 2 first call: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected ok=true for first tool_result")
+	}
+	if obs.ToolName != "Read" {
+		t.Fatalf("expected first observation ToolName=Read, got %q", obs.ToolName)
+	}
+
+	// Line 3: next Feed call should drain the buffered second observation
+	line3 := `{"type":"user","sessionId":"sess-1","cwd":"/tmp","timestamp":"2026-08-10T10:00:02.000Z","message":{"content":"plain text"}}`
+	obs2, ok, err := p.Feed([]byte(line3))
+	if err != nil {
+		t.Fatalf("Feed line 3: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected ok=true for buffered second tool_result")
+	}
+	if obs2.ToolName != "Write" {
+		t.Fatalf("expected second observation ToolName=Write, got %q", obs2.ToolName)
+	}
+
+	// Now feeding line4 should return ok=false (no more buffered, and plain text doesn't produce observation)
+	_, ok, err = p.Feed([]byte(`{"type":"user","sessionId":"sess-1","cwd":"/tmp","message":{"content":"another plain"}}`))
+	if err != nil {
+		t.Fatalf("Feed line 4: %v", err)
+	}
+	if ok {
+		t.Fatalf("expected ok=false, no more buffered observations or matches")
+	}
+}
+
+func TestParserIgnoresOrphanToolResult(t *testing.T) {
+	p := NewParser()
+	// A tool_result with no matching pending tool_use should be silently ignored
+	line := `{"type":"user","sessionId":"sess-1","cwd":"/tmp","message":{"content":[{"type":"tool_result","tool_use_id":"orphan_id","content":"result","is_error":false}]}}`
+	_, ok, err := p.Feed([]byte(line))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ok {
+		t.Fatalf("expected ok=false for orphan tool_result")
+	}
+	if len(p.pending) != 0 {
+		t.Fatalf("expected 0 pending entries, got %d", len(p.pending))
+	}
+}
