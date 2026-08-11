@@ -18,14 +18,34 @@ import (
 // ever needed; see spec §10.
 const minStringLen = 3
 
+// maxRecursionDepth prevents stack overflow from deeply nested or malformed
+// protobuf structures. Legitimate real-world protobuf nesting is shallow;
+// deeply nested structures are either corrupted/version-drifted data or
+// a DoS attack vector.
+//
+// ponytail: hard recursion cap, per-message limits if per-field nesting
+// ever matters in real data.
+const maxRecursionDepth = 100
+
 // ExtractStrings recovers every printable UTF-8 string embedded in a
 // protobuf-encoded blob, by walking the wire format generically (without
 // a schema) and recursing into length-delimited fields that aren't
 // themselves valid text, since those are likely nested sub-messages.
 // Malformed or truncated input causes the scan to stop and return
-// whatever was recovered so far, never a panic.
+// whatever was recovered so far, never a panic. Deep nesting is stopped
+// at a fixed depth limit to prevent stack overflow.
 func ExtractStrings(data []byte) []string {
+	return extractStringsDepth(data, 0)
+}
+
+func extractStringsDepth(data []byte, depth int) []string {
 	var out []string
+
+	// Stop recursing if we've exceeded the depth limit.
+	if depth >= maxRecursionDepth {
+		return out
+	}
+
 	for len(data) > 0 {
 		_, typ, n := protowire.ConsumeTag(data)
 		if n < 0 {
@@ -61,7 +81,7 @@ func ExtractStrings(data []byte) []string {
 			if isMeaningfulText(v) {
 				out = append(out, string(v))
 			} else {
-				out = append(out, ExtractStrings(v)...)
+				out = append(out, extractStringsDepth(v, depth+1)...)
 			}
 		default:
 			return out

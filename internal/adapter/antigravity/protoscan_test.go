@@ -66,3 +66,20 @@ func TestExtractStringsOnTruncatedInputStopsGracefully(t *testing.T) {
 		t.Fatalf("expected no strings from truncated input, got %v", got)
 	}
 }
+
+func TestExtractStringsDeeplyNestedDoesNotStackOverflow(t *testing.T) {
+	// Build a chain of 250 nested empty length-delimited fields.
+	// Each empty field fails isMeaningfulText, forcing recursion.
+	// With a depth limit of 100, this should stop gracefully and not stack overflow.
+	depth := 250
+	var buf []byte
+	for i := 0; i < depth; i++ {
+		buf = protowire.AppendTag(buf, 1, protowire.BytesType)
+		buf = protowire.AppendBytes(buf, []byte{})
+	}
+
+	got := ExtractStrings(buf) // must not panic or stack overflow
+	if len(got) != 0 {
+		t.Fatalf("expected no strings from deeply nested empty fields, got %v", got)
+	}
+}
