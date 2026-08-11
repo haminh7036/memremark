@@ -1,0 +1,4 @@
+{"type":"assistant","uuid":"a1","timestamp":"2026-08-10T10:00:00.000Z","sessionId":"sess-1","cwd":"/home/minh/personal/memremark","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"ls"}}]}}
+{"type":"user","uuid":"a2","timestamp":"2026-08-10T10:00:01.000Z","sessionId":"sess-1","cwd":"/home/minh/personal/memremark","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"README.md\nmain.go","is_error":false}]}}
+{"type":"user","uuid":"a3","timestamp":"2026-08-10T10:00:02.000Z","sessionId":"sess-1","cwd":"/home/minh/personal/memremark","message":{"content":"just a plain question"}}
+{"type":"assistant","uuid":"a4","timestamp":"2026-08-10T10:00:03.000Z","sessionId":"sess-1","cwd":"/home/minh/personal/memremark","message":{"content":[{"type":"tool_use","id":"toolu_2","name":"Read","input":{"file_path":"README.md"}}]}}
