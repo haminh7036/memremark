@@ -68,24 +68,33 @@ func TestExtractStringsOnTruncatedInputStopsGracefully(t *testing.T) {
 }
 
 func TestExtractStringsDeeplyNestedDoesNotStackOverflow(t *testing.T) {
-	// Build a genuinely nested chain: field N contains encoded field N-1.
-	// This forces the scanner to recurse through all levels to reach the bottom.
-	// With maxRecursionDepth=100, a 250-level chain should stop gracefully.
-	depth := 250
+	// Build a genuinely nested chain with a canary string at depth 150+.
+	// With maxRecursionDepth=100, the canary should NOT be extracted (cap prevents recursion).
+	// If the cap is removed/broken, the canary WILL be extracted — this test will fail.
+	const canary = "CANARY_HIDDEN_AT_DEPTH_150"
+	const wrappingDepth = 150 // exceed maxRecursionDepth (100) to prove the cap works
 
-	// Build from innermost out: start with empty, wrap in BytesType, repeat.
-	var innermost []byte // empty innermost message
+	// Innermost: a BytesType field containing the canary string.
+	var innermost []byte
+	innermost = protowire.AppendTag(innermost, 1, protowire.BytesType)
+	innermost = protowire.AppendString(innermost, canary)
 
+	// Wrap the canary in wrappingDepth layers of empty BytesType fields.
 	nested := innermost
-	for i := 0; i < depth; i++ {
+	for i := 0; i < wrappingDepth; i++ {
 		var wrapper []byte
 		wrapper = protowire.AppendTag(wrapper, 1, protowire.BytesType)
 		wrapper = protowire.AppendBytes(wrapper, nested)
 		nested = wrapper
 	}
 
-	got := ExtractStrings(nested) // must not panic or stack overflow
-	if len(got) != 0 {
-		t.Fatalf("expected no strings from deeply nested messages, got %v", got)
+	got := ExtractStrings(nested)
+	// The canary is at depth 150. With maxRecursionDepth=100, we stop before reaching it.
+	// So the canary should NOT be in the output.
+	for _, s := range got {
+		if s == canary {
+			t.Fatalf("depth cap broken: canary at depth %d should not be extracted with maxRecursionDepth=%d, but got %v",
+				wrappingDepth, maxRecursionDepth, got)
+		}
 	}
 }
