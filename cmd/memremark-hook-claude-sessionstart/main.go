@@ -28,7 +28,9 @@ func main() {
 	if summaries == nil {
 		summaries = []storage.Drawer{}
 	}
-	json.NewEncoder(os.Stdout).Encode(buildOutput(summaries))
+	if err := json.NewEncoder(os.Stdout).Encode(buildOutput(summaries)); err != nil {
+		fmt.Fprintln(os.Stderr, "memremark-hook-claude-sessionstart: failed to encode output:", err)
+	}
 	os.Exit(0)
 }
 
