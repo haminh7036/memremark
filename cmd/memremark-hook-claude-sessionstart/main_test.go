@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -38,5 +39,33 @@ func TestBuildOutputSetsHookEventNameAndContext(t *testing.T) {
 	}
 	if !strings.Contains(out.HookSpecificOutput.AdditionalContext, "x") {
 		t.Fatalf("expected additionalContext to include the summary content, got %q", out.HookSpecificOutput.AdditionalContext)
+	}
+}
+
+func TestBuildOutputNilOmitsHookSpecificOutputFromJSON(t *testing.T) {
+	out := buildOutput(nil)
+	bytes, err := json.Marshal(out)
+	if err != nil {
+		t.Fatalf("buildOutput(nil) should produce valid JSON: %v", err)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(bytes, &result); err != nil {
+		t.Fatalf("JSON should be valid and unmarshallable: %v", err)
+	}
+
+	if _, has := result["hookSpecificOutput"]; has {
+		t.Fatalf("hookSpecificOutput should be omitted from JSON when nil, but it's present in: %s", string(bytes))
+	}
+}
+
+func TestGetSummariesReturnsNilOnStorageOpenError(t *testing.T) {
+	// Pass a path where storage.Open will fail
+	summaries, err := getSummaries(".", "/nonexistent/1234567890/memremark.db")
+	if err == nil {
+		t.Fatalf("expected error when storage path is broken, got nil")
+	}
+	if summaries != nil {
+		t.Fatalf("expected nil summaries on error, got %v", summaries)
 	}
 }
