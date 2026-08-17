@@ -44,8 +44,11 @@ type Store struct {
 // Open creates the parent directory if needed, opens the SQLite database
 // at path, and applies the schema. Safe to call repeatedly (idempotent).
 func Open(path string) (*Store, error) {
+	// 0o700: this database is a private activity log (raw commands, file
+	// contents touched) -- the directory and file must not be world/group
+	// readable.
 	if dir := filepath.Dir(path); dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return nil, fmt.Errorf("storage: create dir %s: %w", dir, err)
 		}
 	}
@@ -53,9 +56,28 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("storage: open %s: %w", path, err)
 	}
+	// SQLite allows only one writer at a time anyway, and PRAGMA busy_timeout
+	// is per-connection: without pinning the pool to a single connection,
+	// database/sql could hand out a fresh, un-pragma'd connection to a
+	// concurrent caller and lose the busy_timeout entirely.
+	db.SetMaxOpenConns(1)
+	// Same reasoning as antigravity.openReadOnly: the daemon and the
+	// per-session hook binary can both hit this file at once, so give a
+	// concurrent writer a chance to wait instead of failing immediately
+	// with "database is locked".
+	if _, err := db.Exec("PRAGMA busy_timeout = 5000;"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("storage: set busy_timeout on %s: %w", path, err)
+	}
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("storage: apply schema: %w", err)
+	}
+	// Unconditional: cheap, and simpler than tracking whether the file was
+	// freshly created this call.
+	if err := os.Chmod(path, 0o600); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("storage: chmod %s: %w", path, err)
 	}
 	return &Store{db: db}, nil
 }
@@ -67,23 +89,24 @@ func (s *Store) Close() error {
 
 // GetOrCreateWing returns the wing id for the given project path,
 // creating a new wing row if one doesn't exist yet.
+//
+// This is a single atomic upsert rather than SELECT-then-INSERT: two
+// processes (the daemon's long-lived connection and a hook binary's
+// fresh-per-invocation connection) can race to create the same brand-new
+// path, and a check-then-insert would let the second INSERT fail on the
+// UNIQUE(path) constraint instead of returning the existing id.
 func (s *Store) GetOrCreateWing(path string) (int64, error) {
 	var id int64
-	err := s.db.QueryRow(`SELECT id FROM wings WHERE path = ?`, path).Scan(&id)
-	if err == nil {
-		return id, nil
-	}
-	if err != sql.ErrNoRows {
-		return 0, fmt.Errorf("storage: query wing %s: %w", path, err)
-	}
-	res, err := s.db.Exec(
-		`INSERT INTO wings (path, name, created_at) VALUES (?, ?, ?)`,
+	err := s.db.QueryRow(
+		`INSERT INTO wings (path, name, created_at) VALUES (?, ?, ?)
+		 ON CONFLICT(path) DO UPDATE SET path = path
+		 RETURNING id`,
 		path, filepath.Base(path), time.Now().Unix(),
-	)
+	).Scan(&id)
 	if err != nil {
-		return 0, fmt.Errorf("storage: insert wing %s: %w", path, err)
+		return 0, fmt.Errorf("storage: get or create wing %s: %w", path, err)
 	}
-	return res.LastInsertId()
+	return id, nil
 }
 
 // Hall values a summary drawer may carry.
@@ -148,7 +171,7 @@ func (s *Store) RecentSummaries(wingID int64, limit int) ([]Drawer, error) {
 	rows, err := s.db.Query(
 		`SELECT id, hall, content, created_at FROM drawers
 		 WHERE wing_id = ? AND type = 'summary'
-		 ORDER BY created_at DESC LIMIT ?`,
+		 ORDER BY created_at DESC, id DESC LIMIT ?`,
 		wingID, limit,
 	)
 	if err != nil {

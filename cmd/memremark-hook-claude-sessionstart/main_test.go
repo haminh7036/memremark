@@ -82,11 +82,24 @@ func TestMainWritesValidJSONAndExitsZeroOnStorageFailure(t *testing.T) {
 		t.Fatalf("failed to build binary: %v", err)
 	}
 
-	// Run the actual binary with HOME set to a nonexistent path so storage.Open fails
+	// Force storage.Open's os.MkdirAll to fail regardless of the test
+	// runner's privileges: pointing HOME at a merely-unwritable path (e.g.
+	// under /) only fails for a non-root user -- under root (common in
+	// container CI), MkdirAll would succeed and this test would pass for
+	// the wrong reason (empty summaries, not a real storage failure).
+	// Instead, put a regular *file* where a directory component of
+	// ~/.memremark needs to be: creating a directory entry under a file is
+	// an ENOTDIR error at the filesystem level, which no uid can bypass.
+	blockerFile := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blockerFile, []byte("x"), 0o600); err != nil {
+		t.Fatalf("create blocker file: %v", err)
+	}
+	fakeHome := filepath.Join(blockerFile, "sub")
+
+	// Run the actual binary with HOME set to a path that can never become a directory
 	cmd := exec.Command(tmpBinary)
-	// Set HOME to a path that doesn't exist
 	env := os.Environ()
-	env = append(env, "HOME=/nonexistent/path/that/does/not/exist/1234567890")
+	env = append(env, "HOME="+fakeHome)
 	cmd.Env = env
 
 	output, err := cmd.Output()
