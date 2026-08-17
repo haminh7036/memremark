@@ -19,7 +19,30 @@ Mỗi lần cần thảo luận hay gì thi phải nói lại toàn bộ lịch 
 Chia làm 2 phần: **Core Engine** (trên 1 máy) làm trước, **Sync Layer** (đồng bộ đa thiết bị) làm sau.
 **Core Engine đã cài đặt xong và qua review đầy đủ** (11 task theo kế hoạch + 1 vòng final review chia 4 mảng, tìm và sửa 5 lỗi Critical + 6 lỗi Important). Xem thiết kế tại `docs/superpowers/specs/2026-08-10-core-engine-design.md` (bản tiếng Việt: `2026-08-10-core-engine-design-vi.md`) và kế hoạch triển khai tại `docs/superpowers/plans/2026-08-10-core-engine-implementation.md`. Sync Layer chưa bắt đầu.
 
-## Build
+## Cài đặt nhanh (Khuyến nghị)
+
+```bash
+# 1. Build và cài đặt binary vào ~/.local/bin/ cùng systemd service vào ~/.config/systemd/user/
+make install
+
+# 2. Bật và khởi chạy daemon tự động chạy nền (auto-start khi login)
+make service-enable
+```
+
+Kiểm tra trạng thái daemon:
+```bash
+make service-status
+# hoặc: systemctl --user status memremarkd
+```
+
+Các lệnh quản lý daemon:
+- Bật/chạy: `systemctl --user start memremarkd`
+- Dừng: `systemctl --user stop memremarkd`
+- Xem log trực tiếp: `journalctl --user -u memremarkd -f`
+
+---
+
+## Build thủ công (Manual)
 
 Yêu cầu Go 1.22+.
 
@@ -29,23 +52,11 @@ go build -o memremark-hook-claude-sessionstart ./cmd/memremark-hook-claude-sessi
 go build -o memremark-hook-antigravity-preinvocation ./cmd/memremark-hook-antigravity-preinvocation
 ```
 
-Kiểm tra: `go test ./...` (hoặc thêm `-race` để chắc chắn hơn).
+Kiểm tra: `go test ./...` (hoặc `go test -race ./...`).
 
-## Sử dụng
+## Cấu hình Hooks
 
-### 1. Chạy daemon
-
-```bash
-./memremarkd
-```
-
-Daemon chạy nền, poll mỗi 3 giây, đọc trực tiếp:
-- Transcript Claude Code tại `~/.claude/projects/`
-- Database hội thoại của Antigravity CLI tại `~/.gemini/antigravity-cli/`
-
-và ghi kết quả vào `~/.memremark/memremark.db` (tự tạo thư mục/file nếu chưa có, quyền `0700`/`0600` vì đây là log hoạt động riêng tư).
-
-Dừng bằng Ctrl+C (hoặc gửi `SIGTERM`) — daemon tắt sạch sẽ. **Lưu ý**: daemon hiện chưa có cơ chế tự khởi động lại khi crash hay tự chạy cùng lúc mở CLI — cần tự chạy tay hoặc tự cấu hình bằng systemd/launchd nếu muốn nó luôn chạy nền.
+Daemon poll và lưu trữ tự động vào `~/.memremark/memremark.db`. Để nạp lại ngữ cảnh vào các session mới:
 
 ### 2. Cài hook nạp lại ngữ cảnh cho Claude Code
 

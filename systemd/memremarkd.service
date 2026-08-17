@@ -1,0 +1,14 @@
+[Unit]
+Description=MemRemark Daemon - Cross-Session Memory for AI CLI
+Documentation=https://github.com/haminh7036/memremark
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/memremarkd
+Restart=always
+RestartSec=5s
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+
+[Install]
+WantedBy=default.target
