@@ -12,16 +12,16 @@ import (
 )
 
 // openReadOnly opens an Antigravity CLI SQLite database that agy itself
-// may still be actively writing to.
-//
-// ponytail: relies on code discipline (SELECT-only, enforced by every
-// caller in this file) plus a busy timeout, rather than an OS-/driver-
-// enforced read-only open, since modernc.org/sqlite's exact read-only
-// DSN syntax wasn't confirmed during planning. Upgrade to
-// file:<path>?mode=ro once that's verified against the installed driver
-// version, for a second layer of protection.
+// may still be actively writing to, using SQLite's read-only URI mode
+// (verified empirically against modernc.org/sqlite v1.56.0, the version
+// pinned in go.mod: mode=ro succeeds against an existing file, rejects
+// writes with a driver error, and fails cleanly -- no file created -- when
+// the path doesn't exist) so this package can never create or modify a
+// file inside Antigravity CLI's own directory, even under the narrow race
+// where the target .db is deleted between the daemon's os.Stat check and
+// this open.
 func openReadOnly(path string) (*sql.DB, error) {
-	db, err := sql.Open("sqlite", path)
+	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro")
 	if err != nil {
 		return nil, fmt.Errorf("antigravity: open %s: %w", path, err)
 	}
@@ -92,6 +92,17 @@ func ListConversations(summariesDBPath string) ([]ConversationInfo, error) {
 // returns the highest idx seen. Pass -1 for sinceIdx to read from the
 // beginning; pass the previously returned maxIdx back in on later calls
 // to avoid re-processing the same steps.
+//
+// All observations returned from one call share a single Timestamp (at,
+// the conversation's last_modified_time), because the real steps table has
+// no per-step timestamp column -- this is a limitation of the source data,
+// not something this function can fix. Consumers of covers_from/covers_to
+// should be aware that after a daemon outage, a whole backlog of steps can
+// be stamped as having happened at the same instant.
+//
+// On error, the returned maxIdx is always sinceIdx unchanged (never a
+// partially-advanced value), so a caller that forgets to check err cannot
+// silently skip rows by using it.
 func ReadObservations(conversationDBPath, wingPath, sessionID string, at time.Time, sinceIdx int64) (obs []observation.Observation, maxIdx int64, err error) {
 	db, err := openReadOnly(conversationDBPath)
 	if err != nil {
@@ -110,7 +121,7 @@ func ReadObservations(conversationDBPath, wingPath, sessionID string, at time.Ti
 		var idx int64
 		var payload []byte
 		if err := rows.Scan(&idx, &payload); err != nil {
-			return nil, maxIdx, fmt.Errorf("antigravity: scan step row: %w", err)
+			return nil, sinceIdx, fmt.Errorf("antigravity: scan step row: %w", err)
 		}
 		if idx > maxIdx {
 			maxIdx = idx
@@ -129,5 +140,8 @@ func ReadObservations(conversationDBPath, wingPath, sessionID string, at time.Ti
 			Timestamp: at,
 		})
 	}
-	return obs, maxIdx, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, sinceIdx, err
+	}
+	return obs, maxIdx, nil
 }

@@ -2,6 +2,7 @@ package antigravity
 
 import (
 	"database/sql"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -195,5 +196,65 @@ func TestListConversationsParsesDatetimeAffinityColumn(t *testing.T) {
 	want := time.Date(2026, 7, 17, 3, 45, 48, 875161831, time.UTC)
 	if !convs[0].LastModified.Equal(want) {
 		t.Fatalf("expected LastModified %v, got %v", want, convs[0].LastModified)
+	}
+}
+
+// TestOpenReadOnlyWorksAgainstExistingDatabase proves the switch to SQLite's
+// mode=ro URI parameter didn't break the normal path: every existing query
+// (ListConversations, ReadObservations) still works against a real,
+// existing on-disk database opened through openReadOnly.
+func TestOpenReadOnlyWorksAgainstExistingDatabase(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "conversation_summaries.db")
+	createTestSummariesDB(t, dbPath, "conv-1", "/tmp/project", "2026-07-17 03:45:48.875161831+00:00")
+
+	db, err := openReadOnly(dbPath)
+	if err != nil {
+		t.Fatalf("openReadOnly on existing db: %v", err)
+	}
+	defer db.Close()
+
+	var count int
+	if err := db.QueryRow("SELECT count(*) FROM conversation_summaries").Scan(&count); err != nil {
+		t.Fatalf("query through read-only handle: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 row, got %d", count)
+	}
+
+	// Also exercise the real ListConversations call path, which routes
+	// through openReadOnly.
+	convs, err := ListConversations(dbPath)
+	if err != nil {
+		t.Fatalf("ListConversations through read-only open: %v", err)
+	}
+	if len(convs) != 1 {
+		t.Fatalf("expected 1 conversation, got %d", len(convs))
+	}
+}
+
+// TestOpenReadOnlyFailsCleanlyOnMissingPath proves mode=ro closes the
+// narrow write-on-delete race this fix targets: modernc.org/sqlite's
+// default DSN silently creates a new empty file for a path that doesn't
+// exist, which would be a real (if narrow-window) violation of "never
+// write to files this package doesn't own" if the target .db is deleted
+// between the daemon's os.Stat check and this open. With mode=ro, opening
+// a missing path must fail with an error and must not create a file on
+// disk.
+func TestOpenReadOnlyFailsCleanlyOnMissingPath(t *testing.T) {
+	dir := t.TempDir()
+	missing := filepath.Join(dir, "does-not-exist.db")
+
+	db, err := openReadOnly(missing)
+	if err == nil {
+		if db != nil {
+			db.Close()
+		}
+		t.Fatalf("expected openReadOnly to fail for a missing path, got nil error")
+	}
+
+	if _, statErr := os.Stat(missing); statErr == nil {
+		t.Fatalf("openReadOnly must not create a file for a missing path, but %s now exists", missing)
+	} else if !os.IsNotExist(statErr) {
+		t.Fatalf("unexpected stat error checking for created file: %v", statErr)
 	}
 }

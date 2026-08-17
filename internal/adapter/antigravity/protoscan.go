@@ -27,13 +27,18 @@ const minStringLen = 3
 // ever matters in real data.
 const maxRecursionDepth = 100
 
-// ExtractStrings recovers every printable UTF-8 string embedded in a
+// ExtractStrings recovers every meaningful UTF-8 string embedded in a
 // protobuf-encoded blob, by walking the wire format generically (without
 // a schema) and recursing into length-delimited fields that aren't
 // themselves valid text, since those are likely nested sub-messages.
-// Malformed or truncated input causes the scan to stop and return
-// whatever was recovered so far, never a panic. Deep nesting is stopped
-// at a fixed depth limit to prevent stack overflow.
+// "Meaningful text" means every rune is either unicode.IsPrint or one of
+// the common whitespace controls (\n, \t, \r, \v, \f) -- real tool-use
+// content (multi-line prompts, file contents, diffs) is overwhelmingly
+// multi-line, and a field that fails this check is instead treated as a
+// nested sub-message, so under-accepting here silently drops content
+// rather than erroring. Malformed or truncated input causes the scan to
+// stop and return whatever was recovered so far, never a panic. Deep
+// nesting is stopped at a fixed depth limit to prevent stack overflow.
 func ExtractStrings(data []byte) []string {
 	return extractStringsDepth(data, 0)
 }
@@ -90,16 +95,33 @@ func extractStringsDepth(data []byte, depth int) []string {
 	return out
 }
 
+// isMeaningfulText reports whether v looks like real embedded text rather
+// than incidental binary noise. unicode.IsPrint alone rejects \n, \t, and
+// \r, which would wrongly disqualify almost all real multi-line tool-use
+// content (prompts, file contents, diffs) -- so common whitespace controls
+// are accepted alongside printable runes.
 func isMeaningfulText(v []byte) bool {
 	if len(v) < minStringLen || !utf8.Valid(v) {
 		return false
 	}
 	s := string(v)
-	printable := 0
+	acceptable := 0
 	for _, r := range s {
-		if unicode.IsPrint(r) {
-			printable++
+		if unicode.IsPrint(r) || isCommonWhitespaceControl(r) {
+			acceptable++
 		}
 	}
-	return printable == utf8.RuneCountInString(s)
+	return acceptable == utf8.RuneCountInString(s)
+}
+
+// isCommonWhitespaceControl reports whether r is a whitespace control rune
+// that routinely appears in real text but fails unicode.IsPrint: newline,
+// tab, carriage return, vertical tab, and form feed.
+func isCommonWhitespaceControl(r rune) bool {
+	switch r {
+	case '\n', '\t', '\r', '\v', '\f':
+		return true
+	default:
+		return false
+	}
 }

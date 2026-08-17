@@ -19,6 +19,28 @@ func TestExtractStringsRecoversTopLevelStringField(t *testing.T) {
 	}
 }
 
+// TestExtractStringsPreservesMultiLineText proves the fix for the critical
+// data-loss bug: unicode.IsPrint('\n')/('\t') are false, so before the fix
+// isMeaningfulText rejected any real text containing a newline or tab --
+// which is virtually all real tool-use content (multi-line prompts, file
+// contents, diffs) -- and extractStringsDepth then silently tried (and
+// failed) to parse the bytes as a nested sub-message, dropping the text
+// with no error. This must fail against the unfixed isMeaningfulText and
+// pass once common whitespace controls are accepted as meaningful text.
+func TestExtractStringsPreservesMultiLineText(t *testing.T) {
+	text := "line one\nline two\twith a tab\nline three"
+
+	var buf []byte
+	buf = protowire.AppendTag(buf, 1, protowire.BytesType)
+	buf = protowire.AppendString(buf, text)
+
+	got := ExtractStrings(buf)
+	want := []string{text}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v (multi-line text must survive intact, not be dropped or truncated)", got, want)
+	}
+}
+
 func TestExtractStringsRecursesIntoNestedMessages(t *testing.T) {
 	var inner []byte
 	inner = protowire.AppendTag(inner, 1, protowire.BytesType)
