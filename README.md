@@ -26,6 +26,7 @@ Yêu cầu Go 1.22+.
 ```bash
 go build -o memremarkd ./cmd/memremarkd
 go build -o memremark-hook-claude-sessionstart ./cmd/memremark-hook-claude-sessionstart
+go build -o memremark-hook-antigravity-preinvocation ./cmd/memremark-hook-antigravity-preinvocation
 ```
 
 Kiểm tra: `go test ./...` (hoặc thêm `-race` để chắc chắn hơn).
@@ -72,14 +73,31 @@ Thêm vào `~/.claude/settings.json` (hoặc `.claude/settings.json` trong từn
 
 Thay `/duong/dan/toi/` bằng đường dẫn thật tới binary đã build ở bước Build.
 
-### 3. Antigravity CLI
+### 3. Cài hook nạp lại ngữ cảnh cho Antigravity CLI
 
-Hiện **chưa có** cơ chế nạp lại ngữ cảnh cho Antigravity CLI (daemon vẫn đọc và tóm tắt dữ liệu của nó bình thường, chỉ là chưa tiêm được ngược lại vào session mới) — xem mục "Giới hạn hiện tại" bên dưới.
+Binary `memremark-hook-antigravity-preinvocation` nhận hook `PreInvocation` từ Antigravity CLI, kiểm tra `invocationNum == 0` (lần gọi model đầu tiên của session) và nạp bản tóm tắt gần nhất vào phiên làm việc dưới dạng `ephemeralMessage`.
+
+Thêm vào workspace `.agents/hooks.json` (hoặc cấu hình toàn cục tại `~/.gemini/config/hooks.json`):
+
+```json
+{
+  "memremark": {
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "/duong/dan/toi/memremark-hook-antigravity-preinvocation",
+        "timeout": 5
+      }
+    ]
+  }
+}
+```
+
+Thay `/duong/dan/toi/` bằng đường dẫn thật tới binary đã build ở bước Build.
 
 ## Giới hạn hiện tại
 
 - Daemon không tự khởi động lại khi crash và không tự chạy khi mở CLI — phải tự quản lý vòng đời tiến trình.
-- Chưa có cơ chế nạp ngữ cảnh cho Antigravity CLI (do bản thân Antigravity CLI chưa có hook nào thực thi được trong môi trường đã kiểm chứng — xem spec §2.1, §10).
 - Việc trích xuất nội dung từ Antigravity CLI (`internal/adapter/antigravity`) dùng phương pháp heuristic quét chuỗi trong dữ liệu protobuf thô (không có schema chính thức) — đủ dùng nhưng không đảm bảo trích xuất được cấu trúc tool/argument riêng biệt, chỉ có nội dung text thô.
 - Chưa có Sync Layer — dữ liệu chỉ nằm trên từng máy riêng lẻ.
 
