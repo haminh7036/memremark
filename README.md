@@ -21,18 +21,28 @@ Chia làm 2 phần: **Core Engine** (trên 1 máy) làm trước, **Sync Layer**
 
 ## Cài đặt nhanh (Khuyến nghị)
 
-```bash
-# 1. Build và cài đặt binary vào ~/.local/bin/ cùng systemd service vào ~/.config/systemd/user/
-make install
+Script `install.sh` sẽ tự động:
+1. Build các binary và cài đặt vào `~/.local/bin/`
+2. Cài đặt và bật `systemd user service` để daemon tự chạy nền
+3. **Smart patch** cấu hình hook vào `~/.gemini/config/hooks.json` và `~/.claude/settings.json` (tự tạo backup `.bak`, giữ nguyên các hook/settings khác).
 
-# 2. Bật và khởi chạy daemon tự động chạy nền (auto-start khi login)
-make service-enable
+```bash
+# Cài đặt toàn bộ (cho cả Antigravity CLI và Claude Code):
+./install.sh
+
+# Hoặc chỉ cấu hình riêng cho Antigravity CLI:
+./install.sh --cli=antigravity-cli
+
+# Hoặc chỉ cấu hình riêng cho Claude Code:
+./install.sh --cli=claude-code
+
+# Để gỡ cài đặt hoàn toàn (gỡ service, xóa binary, gỡ hook):
+./install.sh --uninstall
 ```
 
 Kiểm tra trạng thái daemon:
 ```bash
-make service-status
-# hoặc: systemctl --user status memremarkd
+systemctl --user status memremarkd
 ```
 
 Các lệnh quản lý daemon:
@@ -42,19 +52,7 @@ Các lệnh quản lý daemon:
 
 ---
 
-## Build thủ công (Manual)
-
-Yêu cầu Go 1.22+.
-
-```bash
-go build -o memremarkd ./cmd/memremarkd
-go build -o memremark-hook-claude-sessionstart ./cmd/memremark-hook-claude-sessionstart
-go build -o memremark-hook-antigravity-preinvocation ./cmd/memremark-hook-antigravity-preinvocation
-```
-
-Kiểm tra: `go test ./...` (hoặc `go test -race ./...`).
-
-## Cấu hình Hooks
+## Cấu hình Hooks thủ công (Manual)
 
 Daemon poll và lưu trữ tự động vào `~/.memremark/memremark.db`. Để nạp lại ngữ cảnh vào các session mới:
 
