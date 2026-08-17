@@ -319,3 +319,109 @@ func TestPollOnceAntigravityErrorDoesNotAdvanceWatermark(t *testing.T) {
 		t.Fatalf("expected 2 verbatim drawers after the retried poll (no rows skipped), got %d", len(verbatim))
 	}
 }
+
+// TestClaudeCodeOffsetSurvivesDaemonRestart proves Bug 2 is fixed for the
+// Claude Code path: a fresh Daemon/Tailer sharing the same *storage.Store
+// (simulating a process restart) must restore the persisted byte offset
+// instead of re-reading the transcript from byte 0, which would duplicate
+// every historical observation as a new verbatim drawer.
+func TestClaudeCodeOffsetSurvivesDaemonRestart(t *testing.T) {
+	dir := t.TempDir()
+	projectsRoot := filepath.Join(dir, "claude-projects")
+	writeSampleTranscript(t, projectsRoot)
+
+	store, err := storage.Open(filepath.Join(dir, "memremark.db"))
+	if err != nil {
+		t.Fatalf("storage.Open: %v", err)
+	}
+	defer store.Close()
+
+	summariesDB := filepath.Join(dir, "antigravity", "conversation_summaries.db")
+	if err := os.MkdirAll(filepath.Dir(summariesDB), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	createEmptySummariesDB(t, summariesDB)
+
+	// First daemon lifetime: processes the whole transcript once.
+	d1 := New(store, projectsRoot, summariesDB, stubInvoker{reply: "[]"}, stubInvoker{reply: "[]"})
+	if err := d1.PollOnce(context.Background(), time.Now()); err != nil {
+		t.Fatalf("first daemon PollOnce: %v", err)
+	}
+
+	// Simulate a restart: a brand-new Daemon (fresh in-memory Tailer/parser
+	// state) sharing the same *storage.Store, with no new lines appended.
+	d2 := New(store, projectsRoot, summariesDB, stubInvoker{reply: "[]"}, stubInvoker{reply: "[]"})
+	if err := d2.PollOnce(context.Background(), time.Now()); err != nil {
+		t.Fatalf("second daemon PollOnce: %v", err)
+	}
+
+	wingID, err := store.GetOrCreateWing("/tmp/project")
+	if err != nil {
+		t.Fatalf("GetOrCreateWing: %v", err)
+	}
+	verbatim, err := store.VerbatimSince(wingID, "sess-1", time.Unix(0, 0))
+	if err != nil {
+		t.Fatalf("VerbatimSince: %v", err)
+	}
+	if len(verbatim) != 1 {
+		t.Fatalf("expected 1 verbatim drawer after restart (no re-processing of old lines), got %d", len(verbatim))
+	}
+}
+
+// TestAntigravityWatermarkSurvivesDaemonRestart is the Antigravity-side
+// mirror of TestClaudeCodeOffsetSurvivesDaemonRestart above: a fresh Daemon
+// sharing the same *storage.Store must restore the persisted idx watermark
+// instead of defaulting back to -1 and re-reading every step as new.
+func TestAntigravityWatermarkSurvivesDaemonRestart(t *testing.T) {
+	dir := t.TempDir()
+	projectsRoot := filepath.Join(dir, "claude-projects") // no Claude Code transcripts in this test
+
+	store, err := storage.Open(filepath.Join(dir, "memremark.db"))
+	if err != nil {
+		t.Fatalf("storage.Open: %v", err)
+	}
+	defer store.Close()
+
+	antigravityDir := filepath.Join(dir, "antigravity")
+	if err := os.MkdirAll(filepath.Join(antigravityDir, "conversations"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	summariesDB := filepath.Join(antigravityDir, "conversation_summaries.db")
+	createSummariesDBWithConversation(t, summariesDB, "conv-restart", "/tmp/agy-restart", "2026-08-11 10:00:00.000000000+00:00")
+
+	conversationDB := filepath.Join(antigravityDir, "conversations", "conv-restart.db")
+	mustExecSQLite(t, conversationDB, `CREATE TABLE steps (idx integer, step_payload blob)`)
+	mustExecSQLite(t, conversationDB, `INSERT INTO steps (idx, step_payload) VALUES (0, ?)`,
+		buildProtobufPromptBlob("step zero"))
+	mustExecSQLite(t, conversationDB, `INSERT INTO steps (idx, step_payload) VALUES (1, ?)`,
+		buildProtobufPromptBlob("step one"))
+
+	// First daemon lifetime: processes both steps.
+	d1 := New(store, projectsRoot, summariesDB, stubInvoker{reply: "[]"}, stubInvoker{reply: "[]"})
+	if err := d1.PollOnce(context.Background(), time.Now()); err != nil {
+		t.Fatalf("first daemon PollOnce: %v", err)
+	}
+
+	// Simulate a restart: a brand-new Daemon (fresh in-memory
+	// antigravityLastIdx map) sharing the same *storage.Store. A new step
+	// arrives after the restart to confirm forward progress still works.
+	mustExecSQLite(t, conversationDB, `INSERT INTO steps (idx, step_payload) VALUES (2, ?)`,
+		buildProtobufPromptBlob("step two"))
+
+	d2 := New(store, projectsRoot, summariesDB, stubInvoker{reply: "[]"}, stubInvoker{reply: "[]"})
+	if err := d2.PollOnce(context.Background(), time.Now().Add(time.Second)); err != nil {
+		t.Fatalf("second daemon PollOnce: %v", err)
+	}
+
+	wingID, err := store.GetOrCreateWing("/tmp/agy-restart")
+	if err != nil {
+		t.Fatalf("GetOrCreateWing: %v", err)
+	}
+	verbatim, err := store.VerbatimSince(wingID, "conv-restart", time.Unix(0, 0))
+	if err != nil {
+		t.Fatalf("VerbatimSince: %v", err)
+	}
+	if len(verbatim) != 3 {
+		t.Fatalf("expected 3 verbatim drawers (steps 0,1 from before the restart plus step 2 after), got %d", len(verbatim))
+	}
+}

@@ -84,3 +84,16 @@ func (t *Tailer) ReadNewLines(path string) ([][]byte, error) {
 
 	return t.readNewLinesFrom(path, f, offset)
 }
+
+// SeedOffset sets the starting byte offset for path. Only meaningful
+// before the first ReadNewLines call for that path -- used to restore a
+// persisted watermark at daemon startup.
+func (t *Tailer) SeedOffset(path string, offset int64) {
+	t.offsets[path] = offset
+}
+
+// Offset returns the current byte offset stored for path (0 if
+// ReadNewLines has never been called for it).
+func (t *Tailer) Offset(path string) int64 {
+	return t.offsets[path]
+}

@@ -41,87 +41,79 @@ type pendingToolUse struct {
 // Parser turns a Claude Code transcript's JSONL lines into Observations
 // by pairing each tool_use block with its matching tool_result. It is
 // stateful across calls to Feed since the two halves of a tool call
-// appear on different lines. When a single user-turn line contains multiple
-// tool_results, the first Observation is returned and the rest are buffered
-// to drain on subsequent Feed calls.
+// appear on different lines.
 type Parser struct {
 	pending map[string]pendingToolUse // keyed by tool_use id
-	buffer  []observation.Observation  // buffered observations from multi-result lines
 }
 
 // NewParser returns an empty Parser.
 func NewParser() *Parser {
 	return &Parser{
 		pending: make(map[string]pendingToolUse),
-		buffer:  make([]observation.Observation, 0),
 	}
 }
 
-// Feed processes one JSONL line. It returns a completed Observation once
-// a matching tool_result closes out a previously seen tool_use;
-// otherwise ok is false. Malformed or empty lines are skipped
-// (ok=false, err=nil) since a mid-write transcript can contain a
-// truncated final line. If a single line contains multiple tool_results,
-// the first is returned and the rest are buffered to drain on subsequent calls.
-// The buffer is checked *after* the incoming line is fully parsed, so new
-// tool_uses are never discarded even when the buffer is non-empty.
-func (p *Parser) Feed(line []byte) (obs observation.Observation, ok bool, err error) {
-	// Always parse the incoming line first, even if buffer is non-empty
-	if len(line) > 0 {
-		var ev rawEvent
-		if err := json.Unmarshal(line, &ev); err == nil && ev.Message != nil && len(ev.Message.Content) > 0 {
-			ts, _ := time.Parse(time.RFC3339, ev.Timestamp)
+// Feed processes one JSONL line and returns every Observation completed by
+// it -- one per tool_result on this line that matches a previously seen
+// tool_use. The slice is nil if the line completed no observations.
+// Malformed or empty lines are skipped (nil, nil) since a mid-write
+// transcript can contain a truncated final line.
+func (p *Parser) Feed(line []byte) ([]observation.Observation, error) {
+	if len(line) == 0 {
+		return nil, nil
+	}
 
-			var blocks []rawContentBlock
-			if err := json.Unmarshal(ev.Message.Content, &blocks); err == nil {
-				// Successfully parsed content as array of blocks
-				switch ev.Type {
-				case "assistant":
-					for _, b := range blocks {
-						if b.Type != "tool_use" {
-							continue
-						}
-						p.pending[b.ID] = pendingToolUse{
-							name:      b.Name,
-							input:     string(b.Input),
-							sessionID: ev.SessionID,
-							cwd:       ev.CWD,
-							timestamp: ts,
-						}
-					}
+	var ev rawEvent
+	if err := json.Unmarshal(line, &ev); err != nil || ev.Message == nil || len(ev.Message.Content) == 0 {
+		return nil, nil
+	}
+	ts, _ := time.Parse(time.RFC3339, ev.Timestamp)
 
-				case "user":
-					// Collect all matching tool_results from this line
-					for _, b := range blocks {
-						if b.Type != "tool_result" {
-							continue
-						}
-						pend, found := p.pending[b.ToolUseID]
-						if !found {
-							continue
-						}
-						delete(p.pending, b.ToolUseID)
-						p.buffer = append(p.buffer, observation.Observation{
-							WingPath:  pend.cwd,
-							SessionID: pend.sessionID,
-							ToolName:  pend.name,
-							Content:   fmt.Sprintf("input: %s\nresult: %s", pend.input, resultContentText(b.Content)),
-							Timestamp: pend.timestamp,
-						})
-					}
-				}
+	var blocks []rawContentBlock
+	if err := json.Unmarshal(ev.Message.Content, &blocks); err != nil {
+		return nil, nil
+	}
+
+	var out []observation.Observation
+	switch ev.Type {
+	case "assistant":
+		for _, b := range blocks {
+			if b.Type != "tool_use" {
+				continue
 			}
+			p.pending[b.ID] = pendingToolUse{
+				name:      b.Name,
+				input:     string(b.Input),
+				sessionID: ev.SessionID,
+				cwd:       ev.CWD,
+				timestamp: ts,
+			}
+		}
+
+	case "user":
+		// Collect every matching tool_result from this line -- all of them
+		// resolve against p.pending in this same call, so there's nothing
+		// left to hold back for a future Feed call.
+		for _, b := range blocks {
+			if b.Type != "tool_result" {
+				continue
+			}
+			pend, found := p.pending[b.ToolUseID]
+			if !found {
+				continue
+			}
+			delete(p.pending, b.ToolUseID)
+			out = append(out, observation.Observation{
+				WingPath:  pend.cwd,
+				SessionID: pend.sessionID,
+				ToolName:  pend.name,
+				Content:   fmt.Sprintf("input: %s\nresult: %s", pend.input, resultContentText(b.Content)),
+				Timestamp: pend.timestamp,
+			})
 		}
 	}
 
-	// After parsing the line, check the buffer
-	if len(p.buffer) > 0 {
-		obs = p.buffer[0]
-		p.buffer = p.buffer[1:]
-		return obs, true, nil
-	}
-
-	return observation.Observation{}, false, nil
+	return out, nil
 }
 
 // resultContentText extracts human-readable text from a tool_result's
