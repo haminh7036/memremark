@@ -53,13 +53,18 @@ func (d *Daemon) pollAntigravity(now time.Time) error {
 			continue
 		}
 		d.antigravityLastIdx[conv.ID] = maxIdx
-		if err := d.Store.SetPollState(antigravityConvKey(conv.ID), maxIdx); err != nil {
-			log.Printf("daemon: persist watermark for conversation %s: %v", conv.ID, err)
-		}
 		for _, o := range obs {
 			if err := d.recordObservation(o, d.antigravityInvoker, now); err != nil {
 				log.Printf("daemon: record observation: %v", err)
 			}
+		}
+		// Persist the watermark only after every observation in this batch
+		// has actually been written to storage -- mirroring pollClaudeCode's
+		// ordering (persist after the write, not before). Otherwise a crash
+		// between the persist and the writes would make a restart resume
+		// past rows that were never durably recorded, silently losing them.
+		if err := d.Store.SetPollState(antigravityConvKey(conv.ID), maxIdx); err != nil {
+			log.Printf("daemon: persist watermark for conversation %s: %v", conv.ID, err)
 		}
 	}
 	return nil

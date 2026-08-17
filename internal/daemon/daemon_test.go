@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -423,5 +424,45 @@ func TestAntigravityWatermarkSurvivesDaemonRestart(t *testing.T) {
 	}
 	if len(verbatim) != 3 {
 		t.Fatalf("expected 3 verbatim drawers (steps 0,1 from before the restart plus step 2 after), got %d", len(verbatim))
+	}
+}
+
+// TestPollAntigravityPersistsWatermarkAfterWritingObservations is a
+// regression test for a Critical bug introduced in the first pass of this
+// fix: pollAntigravity's SetPollState call for the watermark ran BEFORE the
+// loop that writes the batch's observations via recordObservation. A
+// process crash in the window between "watermark persisted" and
+// "observations actually written" would make the next restart's sinceIdx
+// skip exactly the rows that were never durably recorded -- silent,
+// permanent data loss, the same failure mode this whole fix wave exists to
+// eliminate.
+//
+// A real crash mid-function can't be injected into pollAntigravity from a
+// black-box test without adding a production-only fault-injection seam
+// (recordObservation's writes have no natural per-row failure path to
+// hook, and Store's single pooled connection means locking it externally
+// blocks every write indiscriminately rather than isolating one). So this
+// test instead pins the property directly at the source level: the
+// SetPollState watermark persist must appear strictly after the
+// recordObservation loop in daemon_antigravity.go, matching the ordering
+// daemon_claudecode.go already used correctly. If this ordering regresses,
+// this test fails.
+func TestPollAntigravityPersistsWatermarkAfterWritingObservations(t *testing.T) {
+	src, err := os.ReadFile("daemon_antigravity.go")
+	if err != nil {
+		t.Fatalf("read daemon_antigravity.go: %v", err)
+	}
+	text := string(src)
+
+	loopIdx := strings.Index(text, "for _, o := range obs {")
+	persistIdx := strings.Index(text, "d.Store.SetPollState(antigravityConvKey(conv.ID), maxIdx)")
+	if loopIdx == -1 {
+		t.Fatalf("could not find the recordObservation loop in daemon_antigravity.go")
+	}
+	if persistIdx == -1 {
+		t.Fatalf("could not find the SetPollState watermark persist call in daemon_antigravity.go")
+	}
+	if persistIdx < loopIdx {
+		t.Fatalf("SetPollState watermark persist (source offset %d) must come AFTER the recordObservation loop (source offset %d) -- persisting the watermark before the batch's observations are written reintroduces the crash-window data-loss bug", persistIdx, loopIdx)
 	}
 }
