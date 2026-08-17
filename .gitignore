@@ -1,1 +1,14 @@
 .superpowers/
+
+# Binaries & build artifacts
+bin/
+memremarkd
+memremark-hook-claude-sessionstart
+memremark-hook-antigravity-preinvocation
+
+# Test binaries & databases
+*.test
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
