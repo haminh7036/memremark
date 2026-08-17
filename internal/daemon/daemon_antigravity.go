@@ -19,6 +19,18 @@ func antigravityConvKey(conversationID string) string {
 }
 
 func (d *Daemon) pollAntigravity(now time.Time) error {
+	// Tolerate a summaries DB that doesn't exist yet -- e.g. any machine
+	// where the user has only ever used Claude Code, never Antigravity CLI.
+	// Same tolerance pattern claudecode.DiscoverTranscriptFiles already uses
+	// for a missing ~/.claude/projects directory: "doesn't exist" means "no
+	// conversations, nothing to do", not an error to log every poll tick.
+	if _, err := os.Stat(d.antigravitySummariesDB); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
 	convs, err := antigravity.ListConversations(d.antigravitySummariesDB)
 	if err != nil {
 		return err
