@@ -1,8 +1,11 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,6 +22,22 @@ type stubInvoker struct{ reply string }
 
 func (s stubInvoker) Invoke(ctx context.Context, prompt string) (string, error) {
 	return s.reply, nil
+}
+
+// flakyInvoker fails its first `failures` calls with a transient-looking
+// error, then succeeds -- simulating exactly the scenarios the design spec
+// names (storage error, expired auth, network down, rate limiting).
+type flakyInvoker struct {
+	failures int
+	calls    int
+}
+
+func (f *flakyInvoker) Invoke(ctx context.Context, prompt string) (string, error) {
+	f.calls++
+	if f.calls <= f.failures {
+		return "", fmt.Errorf("transient failure")
+	}
+	return `[{"hall":"fact","content":"listed the project files"}]`, nil
 }
 
 func mustOpenSQLite(t *testing.T, path string) *sql.DB {
@@ -464,5 +483,100 @@ func TestPollAntigravityPersistsWatermarkAfterWritingObservations(t *testing.T) 
 	}
 	if persistIdx < loopIdx {
 		t.Fatalf("SetPollState watermark persist (source offset %d) must come AFTER the recordObservation loop (source offset %d) -- persisting the watermark before the batch's observations are written reintroduces the crash-window data-loss bug", persistIdx, loopIdx)
+	}
+}
+
+// TestPollOnceRetriesSummarizationAfterTransientFailure is the regression
+// test for Critical 2: before the fix, Tracker.Due marked a session as fired
+// as soon as it was returned, regardless of what the caller did with it
+// afterward, so a summarizeSession failure (transient storage error, expired
+// auth, network down, rate limiting) permanently dropped that session's
+// pending summary once the session went quiet for good. The fix only
+// consumes the session from the tracker once summarizeSession actually
+// succeeds, so a failed attempt must be retried on the very next poll tick.
+func TestPollOnceRetriesSummarizationAfterTransientFailure(t *testing.T) {
+	dir := t.TempDir()
+	projectsRoot := filepath.Join(dir, "claude-projects")
+	writeSampleTranscript(t, projectsRoot)
+
+	store, err := storage.Open(filepath.Join(dir, "memremark.db"))
+	if err != nil {
+		t.Fatalf("storage.Open: %v", err)
+	}
+	defer store.Close()
+
+	// Never created: pollAntigravity must tolerate this (Important 4).
+	missingSummariesDB := filepath.Join(dir, "antigravity", "conversation_summaries.db")
+
+	invoker := &flakyInvoker{failures: 1}
+	d := New(store, projectsRoot, missingSummariesDB, invoker, stubInvoker{reply: "[]"})
+
+	base := time.Now()
+	if err := d.PollOnce(context.Background(), base); err != nil {
+		t.Fatalf("first PollOnce (capture verbatim): %v", err)
+	}
+
+	wingID, err := store.GetOrCreateWing("/tmp/project")
+	if err != nil {
+		t.Fatalf("GetOrCreateWing: %v", err)
+	}
+
+	// Session goes idle: this tick's summarization attempt fails.
+	if err := d.PollOnce(context.Background(), base.Add(10*time.Second)); err != nil {
+		t.Fatalf("second PollOnce (failing summarize): %v", err)
+	}
+	summaries, err := store.RecentSummaries(wingID, 10)
+	if err != nil {
+		t.Fatalf("RecentSummaries: %v", err)
+	}
+	if len(summaries) != 0 {
+		t.Fatalf("expected no summary yet after a failed attempt, got %d", len(summaries))
+	}
+
+	// The very next poll tick (not a whole new idle window) must retry the
+	// same session rather than having dropped it permanently.
+	if err := d.PollOnce(context.Background(), base.Add(13*time.Second)); err != nil {
+		t.Fatalf("third PollOnce (retry): %v", err)
+	}
+	summaries, err = store.RecentSummaries(wingID, 10)
+	if err != nil {
+		t.Fatalf("RecentSummaries after retry: %v", err)
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("expected the summary to land after the retry, got %d", len(summaries))
+	}
+	if summaries[0].Content != "listed the project files" {
+		t.Fatalf("unexpected summary content: %q", summaries[0].Content)
+	}
+	if invoker.calls != 2 {
+		t.Fatalf("expected exactly 2 invoker calls (1 failed + 1 retry), got %d", invoker.calls)
+	}
+}
+
+// TestPollAntigravitySkipsWhenSummariesDBMissing is the regression test for
+// Important 4: pollAntigravity must treat a missing
+// antigravitySummariesDB (any machine that's never used Antigravity CLI) as
+// "no conversations, nothing to do" -- not an error logged on every single
+// poll tick.
+func TestPollAntigravitySkipsWhenSummariesDBMissing(t *testing.T) {
+	dir := t.TempDir()
+	store, err := storage.Open(filepath.Join(dir, "memremark.db"))
+	if err != nil {
+		t.Fatalf("storage.Open: %v", err)
+	}
+	defer store.Close()
+
+	missingDB := filepath.Join(dir, "antigravity", "conversation_summaries.db") // never created
+	d := New(store, filepath.Join(dir, "claude-projects"), missingDB, stubInvoker{reply: "[]"}, stubInvoker{reply: "[]"})
+
+	var logBuf bytes.Buffer
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(os.Stderr)
+
+	if err := d.pollAntigravity(time.Now()); err != nil {
+		t.Fatalf("pollAntigravity: expected no error when summaries db is missing, got %v", err)
+	}
+	if logBuf.Len() != 0 {
+		t.Fatalf("expected no log output when summaries db is missing, got %q", logBuf.String())
 	}
 }

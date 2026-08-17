@@ -67,8 +67,15 @@ func (d *Daemon) PollOnce(ctx context.Context, now time.Time) error {
 	}
 	for _, sessionID := range d.Tracker.Due(now, idleWindow) {
 		if err := d.summarizeSession(ctx, sessionID, now); err != nil {
+			// Do NOT consume the session on failure -- leave it due so the
+			// very next poll tick retries it (a few seconds later, not a
+			// whole new idle window). Matches the watermark-on-error
+			// tolerance already used in pollAntigravity: just retry next
+			// tick, no backoff, no dead-lettering.
 			log.Printf("daemon: summarize session %s failed: %v", sessionID, err)
+			continue
 		}
+		d.Tracker.Consume(sessionID)
 	}
 	return nil
 }

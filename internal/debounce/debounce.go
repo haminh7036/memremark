@@ -31,8 +31,11 @@ func (t *Tracker) Touch(sessionID string, at time.Time) {
 }
 
 // Due returns the sessions that have been idle for at least idleWindow
-// since their last Touch, and marks each returned session as fired so it
-// is not returned again until its next Touch.
+// since their last Touch. It does not mark them as fired -- a session is
+// only consumed once the caller has actually handled it successfully, so
+// call Consume explicitly after that. This means a failed handling attempt
+// leaves the session due again on the very next call, instead of being
+// silently and permanently dropped.
 func (t *Tracker) Due(now time.Time, idleWindow time.Duration) []string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -44,8 +47,16 @@ func (t *Tracker) Due(now time.Time, idleWindow time.Duration) []string {
 		}
 		if now.Sub(last) >= idleWindow {
 			due = append(due, sessionID)
-			t.fired[sessionID] = true
 		}
 	}
 	return due
+}
+
+// Consume marks a session as fired so Due won't return it again until its
+// next Touch. Callers must only call this after successfully handling the
+// due session (e.g. summarization succeeded) -- see Daemon.PollOnce.
+func (t *Tracker) Consume(sessionID string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.fired[sessionID] = true
 }
