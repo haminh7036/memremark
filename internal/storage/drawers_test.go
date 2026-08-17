@@ -134,7 +134,7 @@ func TestVerbatimSinceReturnsOnlyNewerRows(t *testing.T) {
 	}
 }
 
-func TestLastSummaryTimeReturnsFalseWhenNoneExists(t *testing.T) {
+func TestLastSummaryCoversToReturnsFalseWhenNoneExists(t *testing.T) {
 	s, err := Open(filepath.Join(t.TempDir(), "memremark.db"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
@@ -142,16 +142,16 @@ func TestLastSummaryTimeReturnsFalseWhenNoneExists(t *testing.T) {
 	defer s.Close()
 
 	wingID, _ := s.GetOrCreateWing("/tmp/project")
-	_, ok, err := s.LastSummaryTime(wingID, "s1")
+	_, ok, err := s.LastSummaryCoversTo(wingID, "s1")
 	if err != nil {
-		t.Fatalf("LastSummaryTime: %v", err)
+		t.Fatalf("LastSummaryCoversTo: %v", err)
 	}
 	if ok {
 		t.Fatalf("expected ok=false when no summary exists")
 	}
 }
 
-func TestLastSummaryTimeReturnsMostRecent(t *testing.T) {
+func TestLastSummaryCoversToReturnsMostRecentCoversTo(t *testing.T) {
 	s, err := Open(filepath.Join(t.TempDir(), "memremark.db"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
@@ -168,11 +168,59 @@ func TestLastSummaryTimeReturnsMostRecent(t *testing.T) {
 		t.Fatalf("insert 2: %v", err)
 	}
 
-	got, ok, err := s.LastSummaryTime(wingID, "s1")
+	got, ok, err := s.LastSummaryCoversTo(wingID, "s1")
 	if err != nil {
-		t.Fatalf("LastSummaryTime: %v", err)
+		t.Fatalf("LastSummaryCoversTo: %v", err)
 	}
 	if !ok || !got.Equal(second) {
 		t.Fatalf("expected %v (ok=true), got %v (ok=%v)", second, got, ok)
+	}
+}
+
+// TestLastSummaryCoversToUsesEventTimeNotInsertionWallClock reproduces the
+// clock-mismatch bug from Important 3: a summary drawer's own created_at is
+// the daemon's poll-time wall-clock when it was inserted, which can be much
+// later than covers_to (the real verbatim event-time it distilled up to) --
+// e.g. during backlog catch-up after downtime. A verbatim row whose event-
+// time falls between covers_to and that insertion wall-clock must still be
+// picked up by the next VerbatimSince call. Before the fix (reading
+// created_at instead of covers_to), this row would be silently and
+// permanently skipped.
+func TestLastSummaryCoversToUsesEventTimeNotInsertionWallClock(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "memremark.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+
+	wingID, _ := s.GetOrCreateWing("/tmp/project")
+
+	coversTo := time.Now().Add(-time.Hour).Truncate(time.Second)  // last real event-time distilled
+	insertedAt := time.Now().Truncate(time.Second)                // daemon's wall clock when it wrote the summary, much later
+	if err := s.InsertSummaryDrawer(wingID, "s1", HallFact, "a", coversTo, coversTo, insertedAt); err != nil {
+		t.Fatalf("insert summary: %v", err)
+	}
+
+	// Newer than what's already been summarized (covers_to), but older than
+	// the summary row's own insertion wall-clock (created_at).
+	lateArrivingEventTime := coversTo.Add(30 * time.Minute)
+	if err := s.InsertVerbatimDrawer(wingID, "s1", "Bash", "late-discovered command", lateArrivingEventTime); err != nil {
+		t.Fatalf("insert verbatim: %v", err)
+	}
+
+	since, ok, err := s.LastSummaryCoversTo(wingID, "s1")
+	if err != nil {
+		t.Fatalf("LastSummaryCoversTo: %v", err)
+	}
+	if !ok || !since.Equal(coversTo) {
+		t.Fatalf("expected since=%v (ok=true), got %v (ok=%v)", coversTo, since, ok)
+	}
+
+	got, err := s.VerbatimSince(wingID, "s1", since)
+	if err != nil {
+		t.Fatalf("VerbatimSince: %v", err)
+	}
+	if len(got) != 1 || got[0].Content != "late-discovered command" {
+		t.Fatalf("expected the late-arriving verbatim row to still be picked up, got %+v", got)
 	}
 }

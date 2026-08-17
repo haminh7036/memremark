@@ -38,7 +38,7 @@ func (d *Daemon) summarizeSession(ctx context.Context, sessionID string, now tim
 	}
 	invoker := d.sessionInvoker[sessionID]
 
-	since, hasPrev, err := d.Store.LastSummaryTime(wingID, sessionID)
+	since, hasPrev, err := d.Store.LastSummaryCoversTo(wingID, sessionID)
 	if err != nil {
 		return err
 	}

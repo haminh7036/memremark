@@ -118,21 +118,31 @@ func (s *Store) VerbatimSince(wingID int64, sessionID string, since time.Time) (
 	return out, rows.Err()
 }
 
-// LastSummaryTime returns the created_at of the most recent summary
-// drawer for a wing/session. ok is false if no summary exists yet.
-func (s *Store) LastSummaryTime(wingID int64, sessionID string) (time.Time, bool, error) {
-	var createdAt int64
+// LastSummaryCoversTo returns covers_to (the real verbatim event-time the
+// most recent summary drawer distilled up to) for a wing/session. ok is
+// false if no summary exists yet.
+//
+// This deliberately reads covers_to, not created_at: created_at is the
+// daemon's poll-time wall-clock when the summary row was inserted, while
+// VerbatimSince filters verbatim rows by their OWN event-time created_at.
+// Those are different clocks that can diverge (backlog catch-up after
+// downtime, out-of-order transcript discovery), and using the insertion
+// wall-clock here could make a verbatim row whose real event-time is older
+// than that wall-clock permanently fail VerbatimSince's filter. covers_to
+// lives in the same clock domain VerbatimSince compares against.
+func (s *Store) LastSummaryCoversTo(wingID int64, sessionID string) (time.Time, bool, error) {
+	var coversTo int64
 	err := s.db.QueryRow(
-		`SELECT created_at FROM drawers
+		`SELECT covers_to FROM drawers
 		 WHERE wing_id = ? AND session_id = ? AND type = 'summary'
 		 ORDER BY created_at DESC LIMIT 1`,
 		wingID, sessionID,
-	).Scan(&createdAt)
+	).Scan(&coversTo)
 	if err == sql.ErrNoRows {
 		return time.Time{}, false, nil
 	}
 	if err != nil {
-		return time.Time{}, false, fmt.Errorf("storage: query last summary time: %w", err)
+		return time.Time{}, false, fmt.Errorf("storage: query last summary covers_to: %w", err)
 	}
-	return time.Unix(createdAt, 0), true, nil
+	return time.Unix(coversTo, 0), true, nil
 }
