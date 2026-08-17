@@ -145,15 +145,16 @@ func parseSummaryItems(modelText string) ([]SummaryItem, error) {
 		return items, nil
 	}
 
-	// No valid non-empty array found. Fall back to empty array if we have one.
-	if emptyArrayCandidate != nil {
-		return emptyArrayCandidate, nil
-	}
-
-	// No valid array at all. Return the last validation error if we have one,
-	// otherwise report that no JSON array was found.
+	// No valid non-empty array found. Prefer surfacing a validation error from
+	// a non-empty candidate over silently falling back to "nothing to
+	// summarize" -- there WAS real content, just with an invalid hall value,
+	// and that needs attention rather than silent suppression. Only fall back
+	// to the empty-array candidate when no other candidate existed at all.
 	if lastValidationError != nil {
 		return nil, lastValidationError
+	}
+	if emptyArrayCandidate != nil {
+		return emptyArrayCandidate, nil
 	}
 
 	return nil, fmt.Errorf("summarizer: no JSON array found in model reply: %q", truncate(text, 200))

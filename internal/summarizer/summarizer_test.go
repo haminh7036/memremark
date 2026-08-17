@@ -137,3 +137,17 @@ func TestSummarizeSkipsInvalidHallInProseBeforeRealArray(t *testing.T) {
 		t.Fatalf("expected 1 item with content 'real', got %+v", items)
 	}
 }
+
+// TestSummarizeSurfacesValidationErrorOverEmptyFallback covers Minor 6: a
+// reply with a stray empty array AND a non-empty-but-invalid-hall array, and
+// no valid non-empty array anywhere. There WAS real content (just with a bad
+// hall value), so the empty-array fallback must not silently win -- the
+// validation error should be surfaced instead.
+func TestSummarizeSurfacesValidationErrorOverEmptyFallback(t *testing.T) {
+	stub := stubInvoker{reply: `[] and also [{"hall":"not-a-real-hall","content":"real"}]`}
+	obs := []observation.Observation{{ToolName: "Bash", Content: "ls"}}
+	_, err := Summarize(context.Background(), stub, obs)
+	if err == nil {
+		t.Fatalf("expected validation error to be surfaced instead of a silent empty result")
+	}
+}
