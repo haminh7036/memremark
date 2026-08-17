@@ -52,15 +52,31 @@ Các lệnh quản lý daemon:
 
 ---
 
+## Đường dẫn mặc định
+
+| Mục | Đường dẫn | Mô tả |
+| :--- | :--- | :--- |
+| **Database** | `~/.memremark/memremark.db` | Lưu trữ SQLite: danh sách wing, quan sát verbatim, tóm tắt và watermark |
+| **Binaries** | `~/.local/bin/memremarkd`<br>`~/.local/bin/memremark-hook-antigravity-preinvocation`<br>`~/.local/bin/memremark-hook-claude-sessionstart` | File thực thi chính sau khi cài đặt |
+| **Systemd** | `~/.config/systemd/user/memremarkd.service` | Quản lý tiến trình daemon tự khởi động |
+| **Hook Antigravity** | `~/.gemini/config/hooks.json` (hoặc `.agents/hooks.json`) | Cấu hình hook `PreInvocation` |
+| **Hook Claude Code** | `~/.claude/settings.json` (hoặc `.claude/settings.json`) | Cấu hình hook `SessionStart` |
+
+---
+
 ## Cấu hình Hooks thủ công (Manual)
 
-Daemon poll và lưu trữ tự động vào `~/.memremark/memremark.db`. Để nạp lại ngữ cảnh vào các session mới:
+Nếu không sử dụng `install.sh`, bạn có thể build và cấu hình thủ công:
 
-### 2. Cài hook nạp lại ngữ cảnh cho Claude Code
+### 1. Build binary
+```bash
+go build -o memremarkd ./cmd/memremarkd
+go build -o memremark-hook-claude-sessionstart ./cmd/memremark-hook-claude-sessionstart
+go build -o memremark-hook-antigravity-preinvocation ./cmd/memremark-hook-antigravity-preinvocation
+```
 
-Binary `memremark-hook-claude-sessionstart` đọc bản tóm tắt gần nhất từ `~/.memremark/memremark.db` cho project hiện tại và in ra JSON theo đúng chuẩn hook `SessionStart` của Claude Code.
-
-Thêm vào `~/.claude/settings.json` (hoặc `.claude/settings.json` trong từng project nếu chỉ muốn bật cho project đó):
+### 2. Cài hook cho Claude Code
+Thêm vào `~/.claude/settings.json`:
 
 ```json
 {
@@ -80,13 +96,8 @@ Thêm vào `~/.claude/settings.json` (hoặc `.claude/settings.json` trong từn
 }
 ```
 
-Thay `/duong/dan/toi/` bằng đường dẫn thật tới binary đã build ở bước Build.
-
-### 3. Cài hook nạp lại ngữ cảnh cho Antigravity CLI
-
-Binary `memremark-hook-antigravity-preinvocation` nhận hook `PreInvocation` từ Antigravity CLI, kiểm tra `invocationNum == 0` (lần gọi model đầu tiên của session) và nạp bản tóm tắt gần nhất vào phiên làm việc dưới dạng `ephemeralMessage`.
-
-Thêm vào workspace `.agents/hooks.json` (hoặc cấu hình toàn cục tại `~/.gemini/config/hooks.json`):
+### 3. Cài hook cho Antigravity CLI
+Thêm vào `~/.gemini/config/hooks.json`:
 
 ```json
 {
@@ -102,11 +113,10 @@ Thêm vào workspace `.agents/hooks.json` (hoặc cấu hình toàn cục tại 
 }
 ```
 
-Thay `/duong/dan/toi/` bằng đường dẫn thật tới binary đã build ở bước Build.
+---
 
 ## Giới hạn hiện tại
 
-- Daemon không tự khởi động lại khi crash và không tự chạy khi mở CLI — phải tự quản lý vòng đời tiến trình.
 - Việc trích xuất nội dung từ Antigravity CLI (`internal/adapter/antigravity`) dùng phương pháp heuristic quét chuỗi trong dữ liệu protobuf thô (không có schema chính thức) — đủ dùng nhưng không đảm bảo trích xuất được cấu trúc tool/argument riêng biệt, chỉ có nội dung text thô.
 - Chưa có Sync Layer — dữ liệu chỉ nằm trên từng máy riêng lẻ.
 
