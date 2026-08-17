@@ -245,4 +245,3 @@ esac
 echo ""
 echo "🎉 MemRemark setup complete!"
 echo "Daemon status: systemctl --user status memremarkd"
-EOF
