@@ -3,6 +3,8 @@ package summarizer
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -149,5 +151,53 @@ func TestSummarizeSurfacesValidationErrorOverEmptyFallback(t *testing.T) {
 	_, err := Summarize(context.Background(), stub, obs)
 	if err == nil {
 		t.Fatalf("expected validation error to be surfaced instead of a silent empty result")
+	}
+}
+
+// TestClaudeCodeInvokerSendsPromptViaStdinNotArgv is the regression test for
+// the production incident where a prompt over Linux's per-argument
+// MAX_ARG_STRLEN (131,072 bytes) made `claude -p <prompt>` fail with
+// "argument list too long" forever. It stands in a fake `claude` executable
+// on PATH that records the argv it received and the stdin it received, so
+// this proves the real exec.Command wiring -- not just an internal helper.
+func TestClaudeCodeInvokerSendsPromptViaStdinNotArgv(t *testing.T) {
+	dir := t.TempDir()
+	argvFile := filepath.Join(dir, "argv.txt")
+	stdinFile := filepath.Join(dir, "stdin.txt")
+	fakeClaude := filepath.Join(dir, "claude")
+
+	script := "#!/bin/sh\n" +
+		"printf '%s' \"$*\" > " + argvFile + "\n" +
+		"cat > " + stdinFile + "\n" +
+		`echo '{"result":"ok","is_error":false}'` + "\n"
+	if err := os.WriteFile(fakeClaude, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake claude: %v", err)
+	}
+
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	prompt := strings.Repeat("x", 200_000) // well over MAX_ARG_STRLEN (131,072 bytes)
+	result, err := ClaudeCodeInvoker{}.Invoke(context.Background(), prompt)
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+	if result != "ok" {
+		t.Fatalf("expected result %q, got %q", "ok", result)
+	}
+
+	argvBytes, err := os.ReadFile(argvFile)
+	if err != nil {
+		t.Fatalf("read argv file: %v", err)
+	}
+	if strings.Contains(string(argvBytes), prompt) {
+		t.Fatalf("prompt was passed as a positional argv element (len %d); it must go via stdin instead", len(prompt))
+	}
+
+	stdinBytes, err := os.ReadFile(stdinFile)
+	if err != nil {
+		t.Fatalf("read stdin file: %v", err)
+	}
+	if string(stdinBytes) != prompt {
+		t.Fatalf("expected the full prompt on stdin (len %d), got len %d", len(prompt), len(stdinBytes))
 	}
 }

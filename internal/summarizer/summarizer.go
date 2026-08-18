@@ -28,8 +28,17 @@ type claudeCodeResult struct {
 type ClaudeCodeInvoker struct{}
 
 // Invoke implements Invoker.
+//
+// ponytail: incident 2026-08-18 -- passing prompt as a positional arg hit
+// Linux's per-argument MAX_ARG_STRLEN (32 pages, 131072 bytes) long before
+// the much larger total ARG_MAX, so any backlog-derived prompt over ~128KB
+// failed with "argument list too long" forever (nothing ever advanced the
+// retry cursor). `claude -p` (empirically verified) reads the prompt from
+// stdin when no positional prompt arg is given, which has no such limit.
 func (ClaudeCodeInvoker) Invoke(ctx context.Context, prompt string) (string, error) {
-	out, err := exec.CommandContext(ctx, "claude", "-p", prompt, "--output-format", "json").Output()
+	cmd := exec.CommandContext(ctx, "claude", "-p", "--output-format", "json")
+	cmd.Stdin = strings.NewReader(prompt)
+	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("summarizer: claude -p failed: %w", err)
 	}
