@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // DiscoverTranscriptFiles returns every Claude Code transcript file
@@ -29,20 +30,23 @@ func DiscoverTranscriptFiles(root string) ([]string, error) {
 	return files, nil
 }
 
+type fileMeta struct {
+	modTime time.Time
+	size    int64
+	offset  int64
+}
+
 // Tailer reads only the bytes appended to each transcript file since the
-// last call for that path, so a poll cycle never re-processes old lines.
+// last call for that path, caching file metadata to avoid reading unchanged files.
 type Tailer struct {
-	offsets map[string]int64
+	files map[string]*fileMeta
 }
 
 // NewTailer returns a Tailer with no prior read history.
 func NewTailer() *Tailer {
-	return &Tailer{offsets: make(map[string]int64)}
+	return &Tailer{files: make(map[string]*fileMeta)}
 }
 
-// readNewLinesFrom returns the complete lines from reader, updating the
-// stored offset for path. It properly distinguishes io.EOF (expected end)
-// from real I/O errors (which are propagated).
 func (t *Tailer) readNewLinesFrom(path string, reader io.Reader, offset int64) ([][]byte, error) {
 	var lines [][]byte
 	bufReader := bufio.NewReader(reader)
@@ -55,45 +59,76 @@ func (t *Tailer) readNewLinesFrom(path string, reader io.Reader, offset int64) (
 		}
 		if err != nil {
 			if !errors.Is(err, io.EOF) {
-				// Real error, not EOF — persist offset for lines we did read
-				// before propagating the error
-				t.offsets[path] = consumed
+				t.getOrCreateMeta(path).offset = consumed
 				return lines, err
 			}
-			break // EOF — normal end of file, might have incomplete line
+			break
 		}
 	}
-	t.offsets[path] = consumed
+	t.getOrCreateMeta(path).offset = consumed
 	return lines, nil
 }
 
-// ReadNewLines returns the complete lines appended to path since the
-// last call for that path. An incomplete trailing line (the file is
-// still being written) is left unconsumed for the next call.
-func (t *Tailer) ReadNewLines(path string) ([][]byte, error) {
+func (t *Tailer) getOrCreateMeta(path string) *fileMeta {
+	meta, ok := t.files[path]
+	if !ok {
+		meta = &fileMeta{}
+		t.files[path] = meta
+	}
+	return meta
+}
+
+// ReadNewLines returns complete lines appended to path, whether the file changed, and any error.
+// An incomplete trailing line (the file is still being written) is left unconsumed for the next call.
+func (t *Tailer) ReadNewLines(path string) ([][]byte, bool, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, false, err
+	}
+
+	meta := t.getOrCreateMeta(path)
+
+	// Dirty-check: if modTime and size match our cached state, skip file completely
+	if !meta.modTime.IsZero() && info.ModTime().Equal(meta.modTime) && info.Size() == meta.size {
+		return nil, false, nil
+	}
+
+	// Truncation check: if file shrunk below our offset, reset to 0
+	if info.Size() < meta.offset {
+		meta.offset = 0
+	}
+
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer f.Close()
 
-	offset := t.offsets[path]
-	if _, err := f.Seek(offset, io.SeekStart); err != nil {
-		return nil, err
+	if _, err := f.Seek(meta.offset, io.SeekStart); err != nil {
+		return nil, false, err
 	}
 
-	return t.readNewLinesFrom(path, f, offset)
+	oldOffset := meta.offset
+	lines, err := t.readNewLinesFrom(path, f, meta.offset)
+	if err != nil {
+		return lines, meta.offset != oldOffset, err
+	}
+
+	meta.modTime = info.ModTime()
+	meta.size = info.Size()
+
+	return lines, meta.offset != oldOffset, nil
 }
 
 // SeedOffset sets the starting byte offset for path. Only meaningful
 // before the first ReadNewLines call for that path -- used to restore a
 // persisted watermark at daemon startup.
 func (t *Tailer) SeedOffset(path string, offset int64) {
-	t.offsets[path] = offset
+	t.getOrCreateMeta(path).offset = offset
 }
 
 // Offset returns the current byte offset stored for path (0 if
 // ReadNewLines has never been called for it).
 func (t *Tailer) Offset(path string) int64 {
-	return t.offsets[path]
+	return t.getOrCreateMeta(path).offset
 }

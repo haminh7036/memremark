@@ -6,7 +6,73 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
+
+func TestTailer_DirtyCheckingAndTruncation(t *testing.T) {
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "test.jsonl")
+
+	if err := os.WriteFile(filePath, []byte("line 1\nline 2\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tailer := NewTailer()
+
+	// 1. Initial read
+	lines, changed, err := tailer.ReadNewLines(filePath)
+	if err != nil {
+		t.Fatalf("first read error: %v", err)
+	}
+	if !changed || len(lines) != 2 {
+		t.Fatalf("expected 2 lines with changed=true, got %d lines, changed=%v", len(lines), changed)
+	}
+
+	// 2. Second read without modifications -> should be dirty-checked (changed=false, no lines, no file open)
+	lines, changed, err = tailer.ReadNewLines(filePath)
+	if err != nil {
+		t.Fatalf("second read error: %v", err)
+	}
+	if changed || len(lines) != 0 {
+		t.Fatalf("expected 0 lines with changed=false on unchanged file, got %d lines, changed=%v", len(lines), changed)
+	}
+
+	// 3. Append a new line
+	f, err := os.OpenFile(filePath, os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString("line 3\n"); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	// Force mtime change if filesystem has coarse resolution
+	now := time.Now().Add(time.Second)
+	_ = os.Chtimes(filePath, now, now)
+
+	lines, changed, err = tailer.ReadNewLines(filePath)
+	if err != nil {
+		t.Fatalf("third read error: %v", err)
+	}
+	if !changed || len(lines) != 1 || string(lines[0]) != "line 3" {
+		t.Fatalf("expected line 3 with changed=true, got %v, changed=%v", lines, changed)
+	}
+
+	// 4. Truncation / File Rewrite
+	if err := os.WriteFile(filePath, []byte("new line 1\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Chtimes(filePath, time.Now().Add(2*time.Second), time.Now().Add(2*time.Second))
+
+	lines, changed, err = tailer.ReadNewLines(filePath)
+	if err != nil {
+		t.Fatalf("read after truncation error: %v", err)
+	}
+	if !changed || len(lines) != 1 || string(lines[0]) != "new line 1" {
+		t.Fatalf("expected reset and read 'new line 1', got %v", lines)
+	}
+}
 
 func linesToStrings(lines [][]byte) []string {
 	out := make([]string, len(lines))
@@ -23,7 +89,7 @@ func TestReadNewLinesOnlyReturnsAppendedContent(t *testing.T) {
 	}
 
 	tailer := NewTailer()
-	lines, err := tailer.ReadNewLines(path)
+	lines, _, err := tailer.ReadNewLines(path)
 	if err != nil {
 		t.Fatalf("ReadNewLines: %v", err)
 	}
@@ -40,7 +106,7 @@ func TestReadNewLinesOnlyReturnsAppendedContent(t *testing.T) {
 	}
 	f.Close()
 
-	lines2, err := tailer.ReadNewLines(path)
+	lines2, _, err := tailer.ReadNewLines(path)
 	if err != nil {
 		t.Fatalf("ReadNewLines (2nd): %v", err)
 	}
@@ -57,7 +123,7 @@ func TestReadNewLinesOnlyReturnsAppendedContent(t *testing.T) {
 	}
 	f.Close()
 
-	lines3, err := tailer.ReadNewLines(path)
+	lines3, _, err := tailer.ReadNewLines(path)
 	if err != nil {
 		t.Fatalf("ReadNewLines (3rd): %v", err)
 	}
@@ -179,7 +245,7 @@ func TestReadNewLinesPersistsOffsetOnError(t *testing.T) {
 	// Check that the offset was persisted even though an error occurred
 	// "line1\n" is 6 bytes, so the offset should be 6
 	expectedOffset := int64(6)
-	actualOffset := tailer.offsets["test.jsonl"]
+	actualOffset := tailer.Offset("test.jsonl")
 	if actualOffset != expectedOffset {
 		t.Fatalf("offset not persisted after error: got %d, expected %d", actualOffset, expectedOffset)
 	}
@@ -205,7 +271,7 @@ func TestReadNewLinesPersistsOffsetOnError(t *testing.T) {
 
 	// Verify offset was updated correctly after successful read
 	expectedOffset2 := int64(12) // 6 (from before) + 6 ("line2\n")
-	actualOffset2 := tailer.offsets["test.jsonl"]
+	actualOffset2 := tailer.Offset("test.jsonl")
 	if actualOffset2 != expectedOffset2 {
 		t.Fatalf("offset not updated correctly: got %d, expected %d", actualOffset2, expectedOffset2)
 	}

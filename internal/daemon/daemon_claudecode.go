@@ -36,9 +36,12 @@ func (d *Daemon) pollClaudeCode(now time.Time) error {
 				d.claudeTailer.SeedOffset(file, persisted)
 			}
 		}
-		lines, err := d.claudeTailer.ReadNewLines(file)
+		lines, changed, err := d.claudeTailer.ReadNewLines(file)
 		if err != nil {
 			log.Printf("daemon: read %s: %v", file, err)
+			continue
+		}
+		if !changed {
 			continue
 		}
 		for _, line := range lines {
