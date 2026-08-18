@@ -1,10 +1,11 @@
 .superpowers/
 
 # Binaries & build artifacts
-bin/
-memremarkd
-memremark-hook-claude-sessionstart
-memremark-hook-antigravity-preinvocation
+/bin/
+/memremarkd
+/memremark-hook-claude-sessionstart
+/memremark-hook-antigravity-preinvocation
+/memremark-mcp
 
 # Test binaries & databases
 *.test
