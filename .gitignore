@@ -13,3 +13,7 @@
 *.db-journal
 *.db-wal
 *.db-shm
+
+# Frontend
+node_modules/
+
