@@ -25,7 +25,7 @@ MemRemark operates as an **Active Memory Palace**:
 ---
 
 ## Project Status & Roadmap
-- **Phase 1: Core Engine, MCP Server & Web Dashboard (Single Host)** — **`v0.1.0` (Complete & Tested)**
+- **Phase 1: Core Engine, MCP Server & Web Dashboard (Single Host)** — **`v0.1.1` (Complete & Tested)**
   - Transcript tailing & SQLite state capture for Claude Code and Antigravity CLI.
   - Headless background summarizer daemon with bidirectional auto-fallback.
   - Seamless context injection hooks (`SessionStart` and `PreInvocation`).

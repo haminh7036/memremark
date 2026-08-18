@@ -71,7 +71,7 @@ func TestMCP_Initialize(t *testing.T) {
 	if !ok {
 		t.Fatalf("missing or invalid serverInfo: %v", resMap["serverInfo"])
 	}
-	if serverInfo["name"] != "memremark-mcp" || serverInfo["version"] != "0.1.0" {
+	if serverInfo["name"] != "memremark-mcp" || serverInfo["version"] != "0.1.1" {
 		t.Fatalf("unexpected serverInfo: %v", serverInfo)
 	}
 }
