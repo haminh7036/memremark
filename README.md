@@ -90,12 +90,38 @@ Các lệnh quản lý daemon:
 | Mục | Đường dẫn | Mô tả |
 | :--- | :--- | :--- |
 | **Database** | `~/.memremark/memremark.db` | Lưu trữ SQLite: danh sách wing, quan sát verbatim, tóm tắt và watermark |
+| **Config File** | `~/.memremark/config.json` | Cấu hình model tóm tắt (`claude_model`, `antigravity_model`, `antigravity_effort`) |
 | **Binaries** | `~/.local/bin/memremarkd`<br>`~/.local/bin/memremark-hook-antigravity-preinvocation`<br>`~/.local/bin/memremark-hook-claude-sessionstart`<br>`~/.local/bin/memremark-mcp` | File thực thi sau khi cài đặt |
 | **Systemd** | `~/.config/systemd/user/memremarkd.service` | Quản lý tiến trình daemon tự khởi động |
 | **Hook Antigravity** | `~/.gemini/config/hooks.json` | Cấu hình hook `PreInvocation` |
 | **MCP Antigravity** | `~/.gemini/config/mcp_config.json` | Cấu hình MCP server cho Antigravity CLI |
 | **Hook Claude Code** | `~/.claude/settings.json` | Cấu hình hook `SessionStart` |
 | **MCP Claude Code** | `~/.claude/mcp.json` | Cấu hình MCP server cho Claude Code |
+
+---
+
+## Tùy biến cấu hình (`config.json`)
+
+Mặc định, `memremarkd` tự động sử dụng các model nhẹ & rẻ nhất để tối ưu chi phí và RAM (`haiku` cho Claude Code, `gemini-3.7-flash-low` với `--effort low` cho Antigravity CLI).
+
+Bạn có thể tùy chỉnh model qua file `~/.memremark/config.json`:
+
+```json
+{
+  "summarizer": {
+    "claude_model": "haiku",
+    "antigravity_model": "gemini-3.7-flash-low",
+    "antigravity_effort": "low"
+  }
+}
+```
+
+* **Thứ tự ưu tiên cấu hình:** Biến môi trường (`MEMREMARK_*`) > File `config.json` > Mặc định hệ thống.
+* **Biến môi trường hỗ trợ:**
+  - `MEMREMARK_CLAUDE_MODEL`: Đổi model cho Claude (vd: `haiku`, `claude-3-5-sonnet`, `default`).
+  - `MEMREMARK_ANTIGRAVITY_MODEL`: Đổi model cho Antigravity (vd: `gemini-3.7-flash-low`, `flash_lite`, `default`).
+  - `MEMREMARK_ANTIGRAVITY_EFFORT`: Đổi mức reasoning effort (vd: `low`, `medium`, `high`, `default`).
+* **Lưu ý:** Đặt giá trị `"default"` hoặc `""` nếu muốn daemon không truyền cờ `--model`, để CLI tự dùng model mặc định của bạn.
 
 ---
 
