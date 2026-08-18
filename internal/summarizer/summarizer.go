@@ -77,6 +77,49 @@ func (AntigravityInvoker) Invoke(ctx context.Context, prompt string) (string, er
 	return res.Response, nil
 }
 
+// FallbackInvoker wraps a Primary and a Fallback invoker.
+// If Primary fails, it automatically delegates to Fallback unless the context
+// was canceled or timed out.
+type FallbackInvoker struct {
+	Primary    Invoker
+	Fallback   Invoker
+	OnFallback func(primaryErr error)
+}
+
+// Invoke implements Invoker with automatic fallback.
+func (f FallbackInvoker) Invoke(ctx context.Context, prompt string) (string, error) {
+	if f.Primary == nil && f.Fallback == nil {
+		return "", fmt.Errorf("summarizer: no invokers configured in FallbackInvoker")
+	}
+	if f.Primary == nil {
+		return f.Fallback.Invoke(ctx, prompt)
+	}
+
+	res, err := f.Primary.Invoke(ctx, prompt)
+	if err == nil {
+		return res, nil
+	}
+
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+
+	if f.Fallback == nil {
+		return "", err
+	}
+
+	if f.OnFallback != nil {
+		f.OnFallback(err)
+	}
+
+	fallbackRes, fallbackErr := f.Fallback.Invoke(ctx, prompt)
+	if fallbackErr != nil {
+		return "", fmt.Errorf("summarizer: primary failed (%w); fallback failed (%w)", err, fallbackErr)
+	}
+
+	return fallbackRes, nil
+}
+
 // SummaryItem is one distilled piece of knowledge the model extracted
 // from a batch of verbatim observations.
 type SummaryItem struct {

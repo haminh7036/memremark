@@ -6,7 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/haminh7036/memremark/internal/observation"
 )
@@ -201,3 +203,170 @@ func TestClaudeCodeInvokerSendsPromptViaStdinNotArgv(t *testing.T) {
 		t.Fatalf("expected the full prompt on stdin (len %d), got len %d", len(prompt), len(stdinBytes))
 	}
 }
+
+func TestFallbackInvoker_PrimarySuccess(t *testing.T) {
+	primary := &stubInvoker{reply: `[{"hall":"fact","content":"a"}]`}
+	fallback := &stubInvoker{err: errors.New("fallback should not be called")}
+	fallbackCalled := false
+	onFallback := func(err error) { fallbackCalled = true }
+
+	invoker := FallbackInvoker{
+		Primary:    primary,
+		Fallback:   fallback,
+		OnFallback: onFallback,
+	}
+
+	got, err := invoker.Invoke(context.Background(), "test prompt")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != `[{"hall":"fact","content":"a"}]` {
+		t.Fatalf("unexpected reply: %q", got)
+	}
+	if fallbackCalled {
+		t.Fatalf("expected OnFallback not to be called")
+	}
+}
+
+func TestFallbackInvoker_PrimaryFails_FallbackSucceeds(t *testing.T) {
+	primary := &stubInvoker{err: errors.New("exit status 1: session limit")}
+	fallback := &stubInvoker{reply: `[{"hall":"fact","content":"fallback"}]`}
+	var capturedPrimaryErr error
+	onFallback := func(err error) { capturedPrimaryErr = err }
+
+	invoker := FallbackInvoker{
+		Primary:    primary,
+		Fallback:   fallback,
+		OnFallback: onFallback,
+	}
+
+	got, err := invoker.Invoke(context.Background(), "test prompt")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != `[{"hall":"fact","content":"fallback"}]` {
+		t.Fatalf("unexpected reply: %q", got)
+	}
+	if capturedPrimaryErr == nil || !strings.Contains(capturedPrimaryErr.Error(), "session limit") {
+		t.Fatalf("expected OnFallback to receive primary error, got: %v", capturedPrimaryErr)
+	}
+}
+
+func TestFallbackInvoker_ContextCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+
+	primary := &stubInvoker{err: errors.New("primary error")}
+	fallback := &stubInvoker{err: errors.New("fallback should not be called")}
+
+	invoker := FallbackInvoker{
+		Primary:  primary,
+		Fallback: fallback,
+	}
+
+	_, err := invoker.Invoke(ctx, "test prompt")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got: %v", err)
+	}
+}
+
+func TestFallbackInvoker_ContextTimeout(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
+	defer cancel()
+	time.Sleep(1 * time.Millisecond) // ensure deadline passed
+
+	primary := &stubInvoker{err: errors.New("primary error")}
+	fallback := &stubInvoker{err: errors.New("fallback should not be called")}
+
+	invoker := FallbackInvoker{
+		Primary:  primary,
+		Fallback: fallback,
+	}
+
+	_, err := invoker.Invoke(ctx, "test prompt")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected context.DeadlineExceeded, got: %v", err)
+	}
+}
+
+func TestFallbackInvoker_BothFail_ReturnsCombinedError(t *testing.T) {
+	primary := &stubInvoker{err: errors.New("quota limit 429")}
+	fallback := &stubInvoker{err: errors.New("model timeout")}
+
+	invoker := FallbackInvoker{
+		Primary:  primary,
+		Fallback: fallback,
+	}
+
+	_, err := invoker.Invoke(context.Background(), "test prompt")
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "quota limit 429") || !strings.Contains(err.Error(), "model timeout") {
+		t.Fatalf("expected error to mention both failures, got: %v", err)
+	}
+}
+
+func TestFallbackInvoker_NilPrimary(t *testing.T) {
+	fallback := &stubInvoker{reply: `[{"hall":"fact","content":"from fallback"}]`}
+	invoker := FallbackInvoker{
+		Primary:  nil,
+		Fallback: fallback,
+	}
+
+	got, err := invoker.Invoke(context.Background(), "test prompt")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != `[{"hall":"fact","content":"from fallback"}]` {
+		t.Fatalf("unexpected reply: %q", got)
+	}
+}
+
+func TestFallbackInvoker_NilFallback(t *testing.T) {
+	primary := &stubInvoker{err: errors.New("primary failed")}
+	invoker := FallbackInvoker{
+		Primary:  primary,
+		Fallback: nil,
+	}
+
+	_, err := invoker.Invoke(context.Background(), "test prompt")
+	if err == nil || !strings.Contains(err.Error(), "primary failed") {
+		t.Fatalf("expected primary error, got: %v", err)
+	}
+}
+
+func TestFallbackInvoker_BothNil(t *testing.T) {
+	invoker := FallbackInvoker{
+		Primary:  nil,
+		Fallback: nil,
+	}
+
+	_, err := invoker.Invoke(context.Background(), "test prompt")
+	if err == nil || !strings.Contains(err.Error(), "no invokers configured") {
+		t.Fatalf("expected error about no invokers configured, got: %v", err)
+	}
+}
+
+func TestFallbackInvoker_ConcurrentRace(t *testing.T) {
+	primary := &stubInvoker{err: errors.New("fail")}
+	fallback := &stubInvoker{reply: `[]`}
+	invoker := FallbackInvoker{
+		Primary:  primary,
+		Fallback: fallback,
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := invoker.Invoke(context.Background(), "test")
+			if err != nil {
+				t.Errorf("concurrent invocation failed: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+}
+
