@@ -37,8 +37,24 @@ func main() {
 	claudeProjectsRoot := filepath.Join(home, ".claude", "projects")
 	antigravitySummariesDB := filepath.Join(home, ".gemini", "antigravity-cli", "conversation_summaries.db")
 
+	claudeInvoker := summarizer.FallbackInvoker{
+		Primary:  summarizer.ClaudeCodeInvoker{},
+		Fallback: summarizer.AntigravityInvoker{},
+		OnFallback: func(err error) {
+			log.Printf("memremarkd: claude summarizer failed (%v), falling back to antigravity", err)
+		},
+	}
+
+	antigravityInvoker := summarizer.FallbackInvoker{
+		Primary:  summarizer.AntigravityInvoker{},
+		Fallback: summarizer.ClaudeCodeInvoker{},
+		OnFallback: func(err error) {
+			log.Printf("memremarkd: antigravity summarizer failed (%v), falling back to claude", err)
+		},
+	}
+
 	d := daemon.New(store, claudeProjectsRoot, antigravitySummariesDB,
-		summarizer.ClaudeCodeInvoker{}, summarizer.AntigravityInvoker{})
+		claudeInvoker, antigravityInvoker)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
