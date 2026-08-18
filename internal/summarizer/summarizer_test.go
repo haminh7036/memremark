@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/haminh7036/memremark/internal/locale"
 	"github.com/haminh7036/memremark/internal/observation"
 )
 
@@ -81,9 +82,21 @@ func TestSummarizeReturnsEmptyForEmptyJSONArray(t *testing.T) {
 
 func TestBuildPromptIncludesObservationContent(t *testing.T) {
 	obs := []observation.Observation{{ToolName: "Bash", Content: "ls -la"}}
-	prompt := buildPrompt(obs)
+	prompt := buildPrompt(obs, locale.TargetLanguage{Code: "vi", Name: "Vietnamese"})
 	if !strings.Contains(prompt, "ls -la") {
 		t.Fatalf("expected prompt to include observation content, got %q", prompt)
+	}
+	if !strings.Contains(prompt, "Write the \"content\" field in Vietnamese") {
+		t.Fatalf("expected prompt to include target language Vietnamese, got %q", prompt)
+	}
+	if !strings.Contains(prompt, "Strict code preservation") {
+		t.Fatalf("expected prompt to include strict code preservation rule, got %q", prompt)
+	}
+
+	// Test Japanese prompt
+	promptJa := buildPrompt(obs, locale.TargetLanguage{Code: "ja", Name: "Japanese"})
+	if !strings.Contains(promptJa, "Write the \"content\" field in Japanese") {
+		t.Fatalf("expected prompt to include Japanese, got %q", promptJa)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"github.com/haminh7036/memremark/internal/adapter/antigravity"
 	"github.com/haminh7036/memremark/internal/adapter/claudecode"
 	"github.com/haminh7036/memremark/internal/debounce"
+	"github.com/haminh7036/memremark/internal/locale"
 	"github.com/haminh7036/memremark/internal/storage"
 	"github.com/haminh7036/memremark/internal/summarizer"
 )
@@ -26,8 +27,9 @@ type dbMeta struct {
 // Daemon ties transcript reading, storage, debounce, and summarization
 // together into one repeatable poll cycle.
 type Daemon struct {
-	Store   *storage.Store
-	Tracker *debounce.Tracker
+	Store          *storage.Store
+	Tracker        *debounce.Tracker
+	TargetLanguage locale.TargetLanguage
 
 	claudeProjectsRoot string
 	claudeTailer       *claudecode.Tailer
@@ -50,10 +52,15 @@ type Daemon struct {
 // New builds a Daemon ready to poll. claudeProjectsRoot is typically
 // $HOME/.claude/projects; antigravitySummariesDB is typically
 // $HOME/.gemini/antigravity-cli/conversation_summaries.db.
-func New(store *storage.Store, claudeProjectsRoot, antigravitySummariesDB string, claudeInvoker, antigravityInvoker summarizer.Invoker) *Daemon {
+func New(store *storage.Store, claudeProjectsRoot, antigravitySummariesDB string, claudeInvoker, antigravityInvoker summarizer.Invoker, targetLang ...locale.TargetLanguage) *Daemon {
+	var lang locale.TargetLanguage
+	if len(targetLang) > 0 {
+		lang = targetLang[0]
+	}
 	return &Daemon{
 		Store:                  store,
 		Tracker:                debounce.NewTracker(),
+		TargetLanguage:         lang,
 		claudeProjectsRoot:     claudeProjectsRoot,
 		claudeTailer:           claudecode.NewTailer(),
 		claudeParsers:          make(map[string]*claudecode.Parser),

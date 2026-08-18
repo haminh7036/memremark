@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/haminh7036/memremark/internal/locale"
 	"github.com/haminh7036/memremark/internal/storage"
 )
 
@@ -85,14 +86,37 @@ func TestFormatSummariesIncludesHallAndContent(t *testing.T) {
 	}
 }
 
-func TestFormatSummariesExactOutput(t *testing.T) {
+func TestFormatSummariesExactOutput_Localized(t *testing.T) {
 	summaries := []storage.Drawer{
 		{Hall: "fact", Content: "Go 1.26 minimum"},
 		{Hall: "advice", Content: "Always run tests before commit"},
 	}
-	got := FormatSummaries(summaries)
-	expected := "Bối cảnh từ các phiên làm việc trước (memremark):\n- [fact] Go 1.26 minimum\n- [advice] Always run tests before commit\n"
-	if got != expected {
-		t.Fatalf("FormatSummaries mismatch:\ngot:  %q\nwant: %q", got, expected)
+
+	// 1. Vietnamese (vi)
+	gotVi := FormatSummaries(summaries, locale.TargetLanguage{Code: "vi", Name: "Vietnamese"})
+	expectedVi := "Bối cảnh từ các phiên làm việc trước (memremark):\n- [fact] Go 1.26 minimum\n- [advice] Always run tests before commit\n"
+	if gotVi != expectedVi {
+		t.Fatalf("Vietnamese FormatSummaries mismatch:\ngot:  %q\nwant: %q", gotVi, expectedVi)
+	}
+
+	// 2. Japanese (ja)
+	gotJa := FormatSummaries(summaries, locale.TargetLanguage{Code: "ja", Name: "Japanese"})
+	expectedJa := "過去のセッションからのコンテキスト (memremark):\n- [fact] Go 1.26 minimum\n- [advice] Always run tests before commit\n"
+	if gotJa != expectedJa {
+		t.Fatalf("Japanese FormatSummaries mismatch:\ngot:  %q\nwant: %q", gotJa, expectedJa)
+	}
+
+	// 3. Chinese (zh)
+	gotZh := FormatSummaries(summaries, locale.TargetLanguage{Code: "zh", Name: "Chinese"})
+	expectedZh := "来自先前会话的上下文 (memremark):\n- [fact] Go 1.26 minimum\n- [advice] Always run tests before commit\n"
+	if gotZh != expectedZh {
+		t.Fatalf("Chinese FormatSummaries mismatch:\ngot:  %q\nwant: %q", gotZh, expectedZh)
+	}
+
+	// 4. Default / English (en)
+	gotEn := FormatSummaries(summaries, locale.TargetLanguage{Code: "en", Name: "English"})
+	expectedEn := "Context from prior sessions (memremark):\n- [fact] Go 1.26 minimum\n- [advice] Always run tests before commit\n"
+	if gotEn != expectedEn {
+		t.Fatalf("English FormatSummaries mismatch:\ngot:  %q\nwant: %q", gotEn, expectedEn)
 	}
 }

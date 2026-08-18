@@ -5,6 +5,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/haminh7036/memremark/internal/locale"
 	"github.com/haminh7036/memremark/internal/storage"
 )
 
@@ -13,7 +14,7 @@ func TestBuildOutput_WithSummaries(t *testing.T) {
 		{Hall: "fact", Content: "minimum Go version is 1.26"},
 		{Hall: "discovery", Content: "WAL mode needed"},
 	}
-	out := buildOutput(summaries)
+	out := buildOutput(summaries, locale.TargetLanguage{Code: "vi", Name: "Vietnamese"})
 	if len(out.InjectSteps) != 1 {
 		t.Fatalf("expected 1 inject step, got %d", len(out.InjectSteps))
 	}
@@ -23,7 +24,7 @@ func TestBuildOutput_WithSummaries(t *testing.T) {
 }
 
 func TestBuildOutput_Empty(t *testing.T) {
-	out := buildOutput(nil)
+	out := buildOutput(nil, locale.TargetLanguage{})
 	if out.InjectSteps != nil {
 		t.Fatalf("expected nil InjectSteps, got %v", out.InjectSteps)
 	}
@@ -97,7 +98,7 @@ func TestRun_SkipsNonZeroInvocation(t *testing.T) {
 	w.Close()
 	os.Stdin = r
 
-	summaries, err := run()
+	summaries, _, err := run()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

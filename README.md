@@ -25,9 +25,10 @@ MemRemark operates as an **Active Memory Palace**:
 ---
 
 ## Project Status & Roadmap
-- **Phase 1: Core Engine, MCP Server & Web Dashboard (Single Host)** — **`v0.1.1` (Complete & Tested)**
+- **Phase 1: Core Engine, MCP Server & Web Dashboard (Single Host)** — **`v0.1.2` (Complete & Tested)**
   - Transcript tailing & SQLite state capture for Claude Code and Antigravity CLI.
   - Headless background summarizer daemon with **dynamic startup capability discovery** and bidirectional auto-fallback.
+  - **Locale-Adaptive Knowledge Distillation**: Auto-detects user environment locale (`$LANG`, `$LC_ALL`) with dual-layer tech term preservation and multi-language context injection headers.
   - **Single-CLI & Multi-CLI Standalone Support**: Runs seamlessly on machines with only Claude Code, only Antigravity CLI, or both.
   - Seamless context injection hooks (`memremark-hook-claude` and `memremark-hook-agy`).
   - Model Context Protocol (MCP) server with 4 tools (`search_memory`, `remember`, `get_timeline`, `forget_memory`).

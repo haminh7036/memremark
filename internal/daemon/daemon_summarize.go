@@ -80,7 +80,7 @@ func (d *Daemon) summarizeSessionWithBatchSize(ctx context.Context, sessionID st
 			obs = append(obs, observation.Observation{ToolName: v.ToolName, Content: v.Content})
 		}
 
-		items, err := summarizer.Summarize(ctx, invoker, obs)
+		items, err := summarizer.Summarize(ctx, invoker, obs, d.TargetLanguage)
 		if err != nil {
 			return err
 		}

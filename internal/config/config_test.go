@@ -9,6 +9,9 @@ import (
 
 func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
+	if cfg.Language != "auto" {
+		t.Errorf("expected default language 'auto', got %q", cfg.Language)
+	}
 	if cfg.Summarizer.ClaudeModel != "haiku" {
 		t.Errorf("expected default claude_model 'haiku', got %q", cfg.Summarizer.ClaudeModel)
 	}
@@ -65,6 +68,7 @@ func TestLoad_CustomJSONFile(t *testing.T) {
 
 func TestLoad_EnvOverrides(t *testing.T) {
 	tmpDir := t.TempDir()
+	t.Setenv("MEMREMARK_LANGUAGE", "vi")
 	t.Setenv("MEMREMARK_CLAUDE_MODEL", "custom-claude-env")
 	t.Setenv("MEMREMARK_ANTIGRAVITY_MODEL", "custom-agy-env")
 	t.Setenv("MEMREMARK_ANTIGRAVITY_EFFORT", "high")
@@ -72,6 +76,9 @@ func TestLoad_EnvOverrides(t *testing.T) {
 	cfg, err := Load(tmpDir)
 	if err != nil {
 		t.Fatalf("failed to load config with env: %v", err)
+	}
+	if cfg.Language != "vi" {
+		t.Errorf("expected env override for language, got %q", cfg.Language)
 	}
 	if cfg.Summarizer.ClaudeModel != "custom-claude-env" {
 		t.Errorf("expected env override for claude, got %q", cfg.Summarizer.ClaudeModel)

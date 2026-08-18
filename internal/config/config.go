@@ -10,6 +10,7 @@ import (
 )
 
 const (
+	DefaultLanguage          = "auto"
 	DefaultClaudeModel       = "haiku"
 	DefaultAntigravityModel  = "gemini-3.7-flash-low"
 	DefaultAntigravityEffort = "low"
@@ -33,6 +34,7 @@ type UIConfig struct {
 
 // Config represents the root configuration for MemRemark.
 type Config struct {
+	Language   string           `json:"language"`
 	Summarizer SummarizerConfig `json:"summarizer"`
 	UI         UIConfig         `json:"ui"`
 }
@@ -40,6 +42,7 @@ type Config struct {
 // DefaultConfig returns a Config struct with recommended low-cost defaults.
 func DefaultConfig() Config {
 	return Config{
+		Language: DefaultLanguage,
 		Summarizer: SummarizerConfig{
 			ClaudeModel:       DefaultClaudeModel,
 			AntigravityModel:  DefaultAntigravityModel,
@@ -74,6 +77,9 @@ func LoadFromFile(filePath string) (Config, error) {
 	}
 
 	// Environment variable overrides
+	if env := os.Getenv("MEMREMARK_LANGUAGE"); env != "" {
+		cfg.Language = env
+	}
 	if env := os.Getenv("MEMREMARK_CLAUDE_MODEL"); env != "" {
 		cfg.Summarizer.ClaudeModel = env
 	}

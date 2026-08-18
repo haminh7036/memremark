@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/haminh7036/memremark/internal/locale"
 	"github.com/haminh7036/memremark/internal/observation"
 	"github.com/haminh7036/memremark/internal/storage"
 )
@@ -173,26 +174,42 @@ type SummaryItem struct {
 }
 
 // Summarize asks invoker to distill observations into hall-classified
-// SummaryItems. It returns (nil, nil) without invoking anything if
-// observations is empty.
-func Summarize(ctx context.Context, invoker Invoker, observations []observation.Observation) ([]SummaryItem, error) {
+// SummaryItems using the target language. It returns (nil, nil) without
+// invoking anything if observations is empty.
+func Summarize(ctx context.Context, invoker Invoker, observations []observation.Observation, lang ...locale.TargetLanguage) ([]SummaryItem, error) {
 	if len(observations) == 0 {
 		return nil, nil
 	}
-	text, err := invoker.Invoke(ctx, buildPrompt(observations))
+	var targetLang locale.TargetLanguage
+	if len(lang) > 0 {
+		targetLang = lang[0]
+	}
+	text, err := invoker.Invoke(ctx, buildPrompt(observations, targetLang))
 	if err != nil {
 		return nil, err
 	}
 	return parseSummaryItems(text)
 }
 
-func buildPrompt(observations []observation.Observation) string {
+func buildPrompt(observations []observation.Observation, lang locale.TargetLanguage) string {
+	targetLangName := lang.Name
+	if targetLangName == "" {
+		targetLangName = "English"
+	}
+
 	var sb strings.Builder
-	sb.WriteString("Dưới đây là các quan sát thô (tool call) từ một phiên làm việc. ")
-	sb.WriteString("Đúc kết chúng thành các mục tri thức ngắn gọn, mỗi mục thuộc 1 trong 4 loại: ")
-	sb.WriteString("fact (quyết định đã chốt), discovery (phát hiện mới), preference (thói quen/sở thích), advice (khuyến nghị/giải pháp). ")
-	sb.WriteString(`Trả lời DUY NHẤT bằng 1 JSON array, mỗi phần tử có dạng {"hall":"...","content":"..."}. `)
-	sb.WriteString("Nếu không có gì đáng đúc kết, trả về [].\n\nQuan sát:\n")
+	sb.WriteString("Given the following raw tool observations from a coding session, distill them into concise memory items.\n")
+	sb.WriteString("Each item must belong to one of 4 halls:\n")
+	sb.WriteString("- fact (settled architectural decisions, conventions, invariants)\n")
+	sb.WriteString("- discovery (new findings, root causes, investigation results)\n")
+	sb.WriteString("- preference (user habits, workflow choices, preferences)\n")
+	sb.WriteString("- advice (actionable recommendations, solutions to pitfalls)\n\n")
+	sb.WriteString("Rules:\n")
+	sb.WriteString(fmt.Sprintf("1. Output language: Write the \"content\" field in %s. Use natural, standard technical terminology appropriate for %s (e.g. Katakana for Japanese, standard IT terms for Chinese, or common English terms where standard).\n", targetLangName, targetLangName))
+	sb.WriteString("2. Strict code preservation: ALWAYS keep code identifiers, file paths, tool/command names, CLI flags, package names, and symbols in their exact original form (e.g., `main.go`, `go test -race`, `SQLite`, `memremarkd`).\n")
+	sb.WriteString("3. Style: Write direct, concise, telegraphic bullet points. Avoid filler words.\n")
+	sb.WriteString(`4. Format: Respond ONLY with a valid JSON array of objects: [{"hall":"...","content":"..."}]. If nothing is worth memorizing, return [].` + "\n\n")
+	sb.WriteString("Observations:\n")
 	for _, o := range observations {
 		sb.WriteString(fmt.Sprintf("- [%s] %s\n", o.ToolName, o.Content))
 	}

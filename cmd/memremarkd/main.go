@@ -12,6 +12,7 @@ import (
 
 	"github.com/haminh7036/memremark/internal/config"
 	"github.com/haminh7036/memremark/internal/daemon"
+	"github.com/haminh7036/memremark/internal/locale"
 	"github.com/haminh7036/memremark/internal/storage"
 	"github.com/haminh7036/memremark/internal/summarizer"
 )
@@ -112,11 +113,14 @@ func main() {
 	claudeProjectsRoot := filepath.Join(home, ".claude", "projects")
 	antigravitySummariesDB := filepath.Join(home, ".gemini", "antigravity-cli", "conversation_summaries.db")
 
+	targetLang := locale.DetectLanguage(cfg.Language)
+	log.Printf("memremarkd: target locale '%s' (%s)", targetLang.Code, targetLang.Name)
+
 	setup := resolveInvokers(cfg, exec.LookPath)
 	log.Printf("memremarkd: %s", setup.Summary)
 
 	d := daemon.New(store, claudeProjectsRoot, antigravitySummariesDB,
-		setup.ClaudeInvoker, setup.AntigravityInvoker)
+		setup.ClaudeInvoker, setup.AntigravityInvoker, targetLang)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

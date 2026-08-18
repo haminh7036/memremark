@@ -8,18 +8,19 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/haminh7036/memremark/internal/locale"
 	"github.com/haminh7036/memremark/internal/storage"
 )
 
 func TestBuildOutputOmitsHookSpecificOutputWhenNoSummaries(t *testing.T) {
-	out := buildOutput(nil)
+	out := buildOutput(nil, locale.TargetLanguage{})
 	if out.HookSpecificOutput != nil {
 		t.Fatalf("expected nil HookSpecificOutput for no summaries, got %+v", out.HookSpecificOutput)
 	}
 }
 
 func TestBuildOutputSetsHookEventNameAndContext(t *testing.T) {
-	out := buildOutput([]storage.Drawer{{Hall: storage.HallFact, Content: "x"}})
+	out := buildOutput([]storage.Drawer{{Hall: storage.HallFact, Content: "x"}}, locale.TargetLanguage{Code: "vi", Name: "Vietnamese"})
 	if out.HookSpecificOutput == nil {
 		t.Fatalf("expected non-nil HookSpecificOutput")
 	}
@@ -32,7 +33,7 @@ func TestBuildOutputSetsHookEventNameAndContext(t *testing.T) {
 }
 
 func TestBuildOutputNilOmitsHookSpecificOutputFromJSON(t *testing.T) {
-	out := buildOutput(nil)
+	out := buildOutput(nil, locale.TargetLanguage{})
 	bytes, err := json.Marshal(out)
 	if err != nil {
 		t.Fatalf("buildOutput(nil) should produce valid JSON: %v", err)
