@@ -1,110 +1,150 @@
 # MemRemark
-Ứng dụng duy trì ngữ cảnh liền mạch giữa các phiên làm việc bằng cách tự động ghi lại các quan sát về việc sử dụng công cụ, tạo ra các bản tóm tắt ngữ nghĩa và cung cấp chúng cho các phiên làm việc sau này. Điều này cho phép Antigravity CLI / Claude Code duy trì tính liên tục của kiến thức về các dự án ngay cả sau khi các phiên làm việc kết thúc hoặc kết nối lại.
 
-## Tech stack
-- Golang cho hiệu năng cao
-- Lưu trữ: Sqlite (đã chốt cho Core Engine v1, xem spec). Cân nhắc PostgreSQL/MySQL/vector database sau, nếu Sync Layer hoặc semantic search thực sự cần.
+[English](README.md) | [Tiếng Việt](README_vi.md)
 
-## Ý tưởng
-Tham khảo từ 2 repo này để xây dựng dự án: [Claude Mem](https://github.com/thedotmack/claude-mem), [Mempalace](https://github.com/mempalace/mempalace)
+Seamless cross-session working memory and context continuity engine for AI coding assistants (**Antigravity CLI** & **Claude Code**). MemRemark automatically captures tool usage observations, generates distilled semantic summaries via a lightweight background daemon, and injects relevant project memory into future sessions.
 
-## Hiện trạng
-Hiện tại có tới tận 3 thiết bị sử dụng CLI (Claude Code, Antigravity CLI), chủ yếu là [Antigravity CLI](https://antigravity.google/product/antigravity-cli) là PC1 (trên công ty), PC2 (tại nhà), Laptop (tại nhà).
-Mỗi lần cần thảo luận hay gì thi phải nói lại toàn bộ lịch sử trò chuyện, cho nên là cực kỳ bất tiện.
+## Tech Stack
+- **Go (Golang)**: High performance, static binary, zero-dependency.
+- **Storage**: SQLite (`modernc.org/sqlite` pure-Go driver, concurrency-safe atomic operations).
+- **Protocol**: Model Context Protocol (MCP) JSON-RPC over stdio.
+- **Frontend Dashboard**: Vue 3.5 + TailwindCSS v4 embedded directly into the Go binary.
 
-## Mục tiêu
-**Tự động** lưu trữ, trích xuất và duy trì liền mạch cuộc trò chuyện và kiến thức được đúc kết lại qua toàn bộ các thiết bị mà không bị ngắt quãng.
+## Inspiration
+Built with inspiration from [Claude Mem](https://github.com/thedotmack/claude-mem) and [Mempalace](https://github.com/mempalace/mempalace).
 
-## Tiến độ
-Chia làm 2 phần: **Core Engine & MCP Server** (trên 1 máy) làm trước, **Sync Layer** (đồng bộ đa thiết bị) làm sau.
-- **Core Engine & MCP Server đã hoàn thiện và kiểm thử đầy đủ** (hỗ trợ Hook injection và Model Context Protocol stdio server với 4 tools).
-- Sync Layer chưa bắt đầu.
+## Motivation
+When working across multiple machines (e.g. Work PC, Home PC, Laptop) and restarting AI coding sessions, context is often lost, requiring developers to repeatedly re-explain project background, conventions, and architectural decisions.
 
-## Cài đặt nhanh (Khuyến nghị)
+MemRemark solves this by **automatically** recording, distilling, and maintaining continuous project knowledge across sessions.
 
-Script `install.sh` sẽ tự động:
-1. Build 4 binary (`memremarkd`, `memremark-hook-claude-sessionstart`, `memremark-hook-antigravity-preinvocation`, `memremark-mcp`) và cài đặt vào `~/.local/bin/`
-2. Cài đặt và bật `systemd user service` để daemon tự chạy nền
-3. **Smart patch** cấu hình hook và MCP server:
-   - **Antigravity CLI**: Hook `PreInvocation` vào `~/.gemini/config/hooks.json` và MCP server `memremark` vào `~/.gemini/config/mcp_config.json`
-   - **Claude Code**: Hook `SessionStart` vào `~/.claude/settings.json` và MCP server `memremark` vào `~/.claude/mcp.json`
-   (Tự tạo bản sao lưu `.bak`, giữ nguyên các cấu hình/hook/MCP server khác).
+---
+
+## Project Status & Roadmap
+- **Phase 1: Core Engine & MCP Server (Single Machine)** — **Complete & Fully Tested**
+  - Transcript tailing & SQLite state capture for Claude Code and Antigravity CLI.
+  - Headless background summarizer daemon with bidirectional auto-fallback.
+  - Seamless context injection hooks (`SessionStart` and `PreInvocation`).
+  - Model Context Protocol (MCP) server with 4 tools.
+  - Interactive Web Dashboard (`memremark-ui`) with Vue 3.5 + Tailwind v4 timeline.
+- **Phase 2: Sync Layer (Multi-Device Sync)** — *Planned*.
+
+---
+
+## Quick Installation (Recommended)
+
+The `install.sh` script automatically:
+1. Builds all binaries (`memremarkd`, `memremark-hook-claude-sessionstart`, `memremark-hook-antigravity-preinvocation`, `memremark-mcp`, `memremark-ui`) and installs them to `~/.local/bin/`.
+2. Sets up and enables the `systemd --user` background service.
+3. **Smart patches** CLI hook and MCP configurations:
+   - **Antigravity CLI**: Configures `PreInvocation` hook in `~/.gemini/config/hooks.json` and MCP server in `~/.gemini/config/mcp_config.json`.
+   - **Claude Code**: Configures `SessionStart` hook in `~/.claude/settings.json` and MCP server in `~/.claude/mcp.json`.
+   *(Creates automated `.bak` backups and preserves all existing settings).*
 
 ```bash
-# Cài đặt toàn bộ (cho cả Antigravity CLI và Claude Code):
+# Install for both Antigravity CLI and Claude Code:
 ./install.sh
 
-# Hoặc chỉ cấu hình riêng cho Antigravity CLI:
+# Or install for Antigravity CLI only:
 ./install.sh --cli=antigravity-cli
 
-# Hoặc chỉ cấu hình riêng cho Claude Code:
+# Or install for Claude Code only:
 ./install.sh --cli=claude-code
 
-# Để gỡ cài đặt hoàn toàn (gỡ service, xóa binary, gỡ hook & MCP server):
+# Complete uninstall (removes service, binaries, hooks, and MCP servers):
 ./install.sh --uninstall
 ```
 
-Kiểm tra trạng thái daemon:
+### Daemon Management
 ```bash
+# Check daemon status:
 systemctl --user status memremarkd
+
+# Start / Stop / Restart:
+systemctl --user start memremarkd
+systemctl --user stop memremarkd
+systemctl --user restart memremarkd
+
+# View live daemon logs:
+journalctl --user -u memremarkd -f
 ```
 
-Các lệnh quản lý daemon:
-- Bật/chạy: `systemctl --user start memremarkd`
-- Dừng: `systemctl --user stop memremarkd`
-- Xem log trực tiếp: `journalctl --user -u memremarkd -f`
+---
+
+## Web Dashboard & Timeline Viewer (`memremark-ui`)
+
+MemRemark includes a self-contained local Web Dashboard built with **Vue 3.5**, **TailwindCSS v4**, and **Lucide Icons** embedded directly into the Go binary.
+
+```bash
+# Launch dashboard (opens browser at http://127.0.0.1:8765):
+memremark-ui
+
+# Customize listening port or bind to 0.0.0.0 for LAN access:
+memremark-ui --host 0.0.0.0 --port 9000
+
+# Run in headless mode without opening browser (useful for remote SSH):
+memremark-ui --no-open
+```
+
+### Features:
+- **Interactive Timeline**: Visual vertical timeline grouped by day.
+- **Hall Badges**: Color-coded categorization (`📌 Fact`, `💡 Discovery`, `⚙️ Preference`, `🎯 Advice`, `⚡ Event`).
+- **Instant Live Search**: Debounced keyword search with `/` keyboard shortcut.
+- **Workspace Switcher**: Filter memory by specific project repository.
+- **1-Click Copy**: Copy distilled insights directly to clipboard.
+- **Dark / Light Mode**: Modern aesthetic with theme persistence.
 
 ---
 
-## MCP Server & Tools
+## MCP Server & Tools (`memremark-mcp`)
 
-`memremark-mcp` cung cấp giao thức **Model Context Protocol (MCP)** qua stdio kết nối trực tiếp với SQLite database, cho phép AI Agent chủ động tra cứu, ghi nhớ và quản lý ký ức theo ngữ cảnh dự án.
+`memremark-mcp` exposes a stdio **Model Context Protocol (MCP)** interface directly connected to SQLite, enabling AI agents to search, record, and manage project memories on demand.
 
-### Danh sách công cụ (Tools)
+### Available Tools:
 
-1. **`search_memory`**: Tìm kiếm ký ức theo từ khóa, danh mục hall, loại drawer hoặc workspace.
-   - `query` *(string)*: Từ khóa tìm kiếm trong nội dung.
-   - `hall` *(string, optional)*: Lọc theo danh mục (`fact`, `discovery`, `preference`, `advice`, `event`).
-   - `type` *(string, optional)*: Lọc theo loại drawer (`summary`, `verbatim`, hoặc `all`).
-   - `wing_path` *(string, optional)*: Đường dẫn thư mục workspace (mặc định: thư mục hiện tại).
-   - `limit` *(integer, optional)*: Số lượng kết quả tối đa (mặc định: 10, tối đa: 50).
+1. **`search_memory`**: Search memories by keyword, hall classification, drawer type, or workspace.
+   - `query` *(string)*: Keyword search in memory content.
+   - `hall` *(string, optional)*: Filter by classification (`fact`, `discovery`, `preference`, `advice`, `event`).
+   - `type` *(string, optional)*: Filter by drawer type (`summary`, `verbatim`, or `all`).
+   - `wing_path` *(string, optional)*: Workspace directory path (defaults to current working directory).
+   - `limit` *(integer, optional)*: Maximum results (default: 10, max: 50).
 
-2. **`remember`**: Ghi nhớ tường minh một bài học, quy ước, quyết định hoặc phát hiện mới vào database.
-   - `content` *(string, required)*: Nội dung cần ghi nhớ.
-   - `hall` *(string, required)*: Phân loại ký ức (`fact`, `discovery`, `preference`, `advice`).
-   - `wing_path` *(string, optional)*: Đường dẫn thư mục workspace (mặc định: thư mục hiện tại).
+2. **`remember`**: Explicitly record a lesson, convention, architectural decision, or discovery.
+   - `content` *(string, required)*: Content to memorize.
+   - `hall` *(string, required)*: Classification (`fact`, `discovery`, `preference`, `advice`).
+   - `wing_path` *(string, optional)*: Workspace directory path (defaults to current working directory).
 
-3. **`get_timeline`**: Xem dòng thời gian chi tiết các sự kiện/tóm tắt diễn ra theo thứ tự thời gian.
-   - `session_id` *(string, optional)*: Lọc theo ID phiên làm việc cụ thể.
-   - `wing_path` *(string, optional)*: Đường dẫn thư mục workspace (mặc định: thư mục hiện tại).
-   - `since` *(integer, optional)*: Mốc Unix timestamp để lấy các sự kiện sau thời điểm đó.
-   - `limit` *(integer, optional)*: Số lượng sự kiện tối đa (mặc định: 20, tối đa: 100).
+3. **`get_timeline`**: Retrieve chronologically ordered events and summaries.
+   - `session_id` *(string, optional)*: Filter by specific session ID.
+   - `wing_path` *(string, optional)*: Workspace directory path (defaults to current working directory).
+   - `since` *(integer, optional)*: Unix timestamp threshold.
+   - `limit` *(integer, optional)*: Maximum items (default: 20, max: 100).
 
-4. **`forget_memory`**: Xóa một drawer ký ức lỗi thời hoặc sai lệch theo ID.
-   - `id` *(integer, required)*: ID của drawer cần xóa.
+4. **`forget_memory`**: Delete an outdated or incorrect memory drawer by ID.
+   - `id` *(integer, required)*: Drawer ID to delete.
 
 ---
 
-## Đường dẫn mặc định
+## Default File Locations
 
-| Mục | Đường dẫn | Mô tả |
+| Item | Path | Description |
 | :--- | :--- | :--- |
-| **Database** | `~/.memremark/memremark.db` | Lưu trữ SQLite: danh sách wing, quan sát verbatim, tóm tắt và watermark |
-| **Config File** | `~/.memremark/config.json` | Cấu hình model tóm tắt (`claude_model`, `antigravity_model`, `antigravity_effort`) |
-| **Binaries** | `~/.local/bin/memremarkd`<br>`~/.local/bin/memremark-hook-antigravity-preinvocation`<br>`~/.local/bin/memremark-hook-claude-sessionstart`<br>`~/.local/bin/memremark-mcp` | File thực thi sau khi cài đặt |
-| **Systemd** | `~/.config/systemd/user/memremarkd.service` | Quản lý tiến trình daemon tự khởi động |
-| **Hook Antigravity** | `~/.gemini/config/hooks.json` | Cấu hình hook `PreInvocation` |
-| **MCP Antigravity** | `~/.gemini/config/mcp_config.json` | Cấu hình MCP server cho Antigravity CLI |
-| **Hook Claude Code** | `~/.claude/settings.json` | Cấu hình hook `SessionStart` |
-| **MCP Claude Code** | `~/.claude/mcp.json` | Cấu hình MCP server cho Claude Code |
+| **Database** | `~/.memremark/memremark.db` | SQLite store: wings, verbatim observations, distilled summaries, poll watermark |
+| **Configuration** | `~/.memremark/config.json` | Model & UI settings (`claude_model`, `antigravity_model`, `ui.port`, etc.) |
+| **Binaries** | `~/.local/bin/memremark*` | Installed executables (`memremarkd`, hooks, MCP server, UI) |
+| **Systemd Service** | `~/.config/systemd/user/memremarkd.service` | User-level background daemon unit |
+| **Antigravity Hook** | `~/.gemini/config/hooks.json` | `PreInvocation` hook configuration |
+| **Antigravity MCP** | `~/.gemini/config/mcp_config.json` | MCP server entry for Antigravity CLI |
+| **Claude Code Hook** | `~/.claude/settings.json` | `SessionStart` hook configuration |
+| **Claude Code MCP** | `~/.claude/mcp.json` | MCP server entry for Claude Code |
 
 ---
 
-## Tùy biến cấu hình (`config.json`)
+## Configuration (`config.json`)
 
-Mặc định, `memremarkd` tự động sử dụng các model nhẹ & rẻ nhất để tối ưu chi phí và RAM (`haiku` cho Claude Code, `gemini-3.7-flash-low` với `--effort low` cho Antigravity CLI).
+By default, `memremarkd` uses the lightest and fastest models to minimize token costs and RAM usage (`haiku` for Claude Code, `gemini-3.7-flash-low` with `--effort low` for Antigravity CLI).
 
-Bạn có thể tùy chỉnh model qua file `~/.memremark/config.json`:
+You can customize models and UI settings in `~/.memremark/config.json`:
 
 ```json
 {
@@ -112,34 +152,38 @@ Bạn có thể tùy chỉnh model qua file `~/.memremark/config.json`:
     "claude_model": "haiku",
     "antigravity_model": "gemini-3.7-flash-low",
     "antigravity_effort": "low"
+  },
+  "ui": {
+    "host": "127.0.0.1",
+    "port": 8765,
+    "auto_open": true
   }
 }
 ```
 
-* **Thứ tự ưu tiên cấu hình:** Biến môi trường (`MEMREMARK_*`) > File `config.json` > Mặc định hệ thống.
-* **Biến môi trường hỗ trợ:**
-  - `MEMREMARK_CLAUDE_MODEL`: Đổi model cho Claude (vd: `haiku`, `claude-3-5-sonnet`, `default`).
-  - `MEMREMARK_ANTIGRAVITY_MODEL`: Đổi model cho Antigravity (vd: `gemini-3.7-flash-low`, `flash_lite`, `default`).
-  - `MEMREMARK_ANTIGRAVITY_EFFORT`: Đổi mức reasoning effort (vd: `low`, `medium`, `high`, `default`).
-* **Lưu ý:** Đặt giá trị `"default"` hoặc `""` nếu muốn daemon không truyền cờ `--model`, để CLI tự dùng model mặc định của bạn.
+* **Precedence:** Environment variables (`MEMREMARK_*`) > `config.json` > Default fallback.
+* **Environment variables:**
+  - `MEMREMARK_CLAUDE_MODEL`: Override Claude model (e.g. `haiku`, `claude-3-5-sonnet`, `default`).
+  - `MEMREMARK_ANTIGRAVITY_MODEL`: Override Antigravity model (e.g. `gemini-3.7-flash-low`, `flash_lite`, `default`).
+  - `MEMREMARK_ANTIGRAVITY_EFFORT`: Override effort level (`low`, `medium`, `high`, `default`).
+  - `MEMREMARK_UI_HOST`: Custom UI host binding.
+  - `MEMREMARK_UI_PORT`: Custom UI port.
 
 ---
 
-## Cấu hình Hooks & MCP thủ công (Manual)
+## Manual Configuration (Without `install.sh`)
 
-Nếu không sử dụng `install.sh`, bạn có thể build và cấu hình thủ công:
-
-### 1. Build binary
+### 1. Build Binaries
 ```bash
-go build -o memremarkd ./cmd/memremarkd
-go build -o memremark-hook-claude-sessionstart ./cmd/memremark-hook-claude-sessionstart
-go build -o memremark-hook-antigravity-preinvocation ./cmd/memremark-hook-antigravity-preinvocation
-go build -o memremark-mcp ./cmd/memremark-mcp
+go build -o bin/memremarkd ./cmd/memremarkd
+go build -o bin/memremark-hook-claude-sessionstart ./cmd/memremark-hook-claude-sessionstart
+go build -o bin/memremark-hook-antigravity-preinvocation ./cmd/memremark-hook-antigravity-preinvocation
+go build -o bin/memremark-mcp ./cmd/memremark-mcp
+go build -o bin/memremark-ui ./cmd/memremark-ui
 ```
 
-### 2. Cài hook cho Claude Code
-Thêm vào `~/.claude/settings.json`:
-
+### 2. Configure Claude Code Hooks & MCP
+Add to `~/.claude/settings.json`:
 ```json
 {
   "hooks": {
@@ -149,7 +193,7 @@ Thêm vào `~/.claude/settings.json`:
         "hooks": [
           {
             "type": "command",
-            "command": "/duong/dan/toi/memremark-hook-claude-sessionstart"
+            "command": "/path/to/memremark-hook-claude-sessionstart"
           }
         ]
       }
@@ -158,29 +202,26 @@ Thêm vào `~/.claude/settings.json`:
 }
 ```
 
-### 3. Cài MCP server cho Claude Code
-Thêm vào `~/.claude/mcp.json`:
-
+Add to `~/.claude/mcp.json`:
 ```json
 {
   "mcpServers": {
     "memremark": {
-      "command": "/duong/dan/toi/memremark-mcp"
+      "command": "/path/to/memremark-mcp"
     }
   }
 }
 ```
 
-### 4. Cài hook cho Antigravity CLI
-Thêm vào `~/.gemini/config/hooks.json`:
-
+### 3. Configure Antigravity CLI Hooks & MCP
+Add to `~/.gemini/config/hooks.json`:
 ```json
 {
   "memremark": {
     "PreInvocation": [
       {
         "type": "command",
-        "command": "/duong/dan/toi/memremark-hook-antigravity-preinvocation",
+        "command": "/path/to/memremark-hook-antigravity-preinvocation",
         "timeout": 5
       }
     ]
@@ -188,14 +229,12 @@ Thêm vào `~/.gemini/config/hooks.json`:
 }
 ```
 
-### 5. Cài MCP server cho Antigravity CLI
-Thêm vào `~/.gemini/config/mcp_config.json`:
-
+Add to `~/.gemini/config/mcp_config.json`:
 ```json
 {
   "mcpServers": {
     "memremark": {
-      "command": "/duong/dan/toi/memremark-mcp"
+      "command": "/path/to/memremark-mcp"
     }
   }
 }
@@ -203,8 +242,6 @@ Thêm vào `~/.gemini/config/mcp_config.json`:
 
 ---
 
-## Giới hạn hiện tại
-
-- Việc trích xuất nội dung từ Antigravity CLI (`internal/adapter/antigravity`) dùng phương pháp heuristic quét chuỗi trong dữ liệu protobuf thô (không có schema chính thức) — đủ dùng nhưng không đảm bảo trích xuất được cấu trúc tool/argument riêng biệt, chỉ có nội dung text thô.
-- Chưa có Sync Layer — dữ liệu chỉ nằm trên từng máy riêng lẻ.
-
+## Limitations
+- Extraction from Antigravity CLI (`internal/adapter/antigravity`) uses schema-less Protobuf wire scanning over SQLite blobs (sufficient for distilled memory, but raw structured arguments are not separately typed).
+- Multi-device sync (Sync Layer) is scheduled for Phase 2.
