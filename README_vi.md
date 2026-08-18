@@ -23,10 +23,12 @@ MemRemark hoạt động theo mô hình **Active Memory Palace**:
 ## Trạng thái dự án & Lộ trình
 - **Phase 1: Core Engine, MCP Server & Web Dashboard (Single Host)** — **`v0.1.1` (Hoàn thành & Đã kiểm thử)**
   - Tự động trích xuất transcript từ Claude Code và Antigravity CLI.
-  - Daemon tóm tắt chạy nền với cơ chế tự động Fallback 2 chiều.
-  - CLI Hooks nạp ngữ cảnh tự động cho Claude Code và Antigravity CLI.
+  - Daemon tóm tắt chạy nền với **cơ chế tự động phát hiện CLI khi khởi động (Startup Capability Discovery)** và Fallback 2 chiều.
+  - **Hỗ trợ chạy độc lập Single-CLI & Multi-CLI**: Tự động thích ứng mượt mà khi máy chỉ cài Claude Code, chỉ cài Antigravity CLI hoặc có cả hai.
+  - CLI Hooks nạp ngữ cảnh tinh gọn (`memremark-hook-claude` và `memremark-hook-agy`).
   - MCP stdio server với 4 tools (`search_memory`, `remember`, `get_timeline`, `forget_memory`).
   - Web Dashboard dòng thời gian Vue 3.5 + Tailwind v4 nhúng trực tiếp trong Go binary (`memremark-ui`).
+  - Script cài đặt thông minh (`install.sh`) tự động nhận diện CLI và cấu hình có chọn lọc.
 - **Phase 2: Sync Layer (Đồng bộ đa thiết bị)** — *Kế hoạch tiếp theo (`v0.2.0`)*.
 
 ### Quy ước phiên bản (Zero-Versioning)
