@@ -236,15 +236,32 @@ func TestStore_SearchDrawers_Filters(t *testing.T) {
 
 	wingID, _ := store.GetOrCreateWing("/test/ws1")
 	now := time.Now().Truncate(time.Second)
+	coversFrom := now.Add(-time.Hour).Truncate(time.Second)
+	coversTo := now.Truncate(time.Second)
 
-	_ = store.InsertSummaryDrawer(wingID, "s1", HallFact, "Fact about golang compiler", now, now, now)
-	_ = store.InsertSummaryDrawer(wingID, "s1", HallAdvice, "Advice on memory management", now, now, now.Add(time.Second))
-	_ = store.InsertVerbatimDrawer(wingID, "s1", "Bash", "go build -o test", now.Add(2*time.Second))
+	_ = store.InsertSummaryDrawer(wingID, "s1", HallFact, "Fact about golang compiler", coversFrom, coversTo, now)
+	_ = store.InsertSummaryDrawer(wingID, "s1", HallAdvice, "Advice on memory management", coversFrom, coversTo, now.Add(time.Second))
+	_ = store.InsertVerbatimDrawer(wingID, "s2", "Bash", "go build -o test", now.Add(2*time.Second))
 
-	// Search by query
+	// Search by query and verify fields
 	res, err := store.SearchDrawers(wingID, "golang", "", "", 10)
 	if err != nil || len(res) != 1 || res[0].Hall != HallFact {
 		t.Fatalf("search query failed: got %v, err: %v", res, err)
+	}
+	if res[0].WingID != wingID {
+		t.Fatalf("expected WingID %d, got %d", wingID, res[0].WingID)
+	}
+	if res[0].SessionID != "s1" {
+		t.Fatalf("expected SessionID 's1', got %q", res[0].SessionID)
+	}
+	if res[0].CoversFrom != coversFrom.Unix() {
+		t.Fatalf("expected CoversFrom %d, got %d", coversFrom.Unix(), res[0].CoversFrom)
+	}
+	if res[0].CoversTo != coversTo.Unix() {
+		t.Fatalf("expected CoversTo %d, got %d", coversTo.Unix(), res[0].CoversTo)
+	}
+	if res[0].Type != "summary" {
+		t.Fatalf("expected Type 'summary', got %q", res[0].Type)
 	}
 
 	// Search by hall
@@ -253,16 +270,32 @@ func TestStore_SearchDrawers_Filters(t *testing.T) {
 		t.Fatalf("search hall failed: got %v, err: %v", res, err)
 	}
 
-	// Search by type=verbatim
+	// Search by type=verbatim and verify fields
 	res, err = store.SearchDrawers(wingID, "", "", "verbatim", 10)
 	if err != nil || len(res) != 1 || res[0].ToolName != "Bash" {
 		t.Fatalf("search verbatim failed: got %v, err: %v", res, err)
 	}
+	if res[0].WingID != wingID {
+		t.Fatalf("expected WingID %d, got %d", wingID, res[0].WingID)
+	}
+	if res[0].SessionID != "s2" {
+		t.Fatalf("expected SessionID 's2', got %q", res[0].SessionID)
+	}
+	if res[0].CoversFrom != 0 || res[0].CoversTo != 0 {
+		t.Fatalf("expected CoversFrom/To=0 for verbatim, got %d/%d", res[0].CoversFrom, res[0].CoversTo)
+	}
+	if res[0].Type != "verbatim" {
+		t.Fatalf("expected Type 'verbatim', got %q", res[0].Type)
+	}
 
-	// Limit clamping
+	// Limit clamping (limit=0 defaults to 10, limit > 200 clamps to 200)
 	res, err = store.SearchDrawers(wingID, "", "", "all", 0)
 	if err != nil || len(res) != 3 {
 		t.Fatalf("search limit clamping failed: got %d items", len(res))
+	}
+	res, err = store.SearchDrawers(wingID, "", "", "all", 250)
+	if err != nil || len(res) != 3 {
+		t.Fatalf("search limit clamping >200 failed: got %d items", len(res))
 	}
 }
 

@@ -64,7 +64,7 @@ func (s *Server) handleTimeline(w http.ResponseWriter, r *http.Request) {
 
 	items := make([]DrawerItem, 0, len(drawers))
 	for _, d := range drawers {
-		itemType := drawerType
+		itemType := d.Type
 		if itemType == "" {
 			if d.ToolName != "" || d.Hall == "event" {
 				itemType = "verbatim"
@@ -73,13 +73,16 @@ func (s *Server) handleTimeline(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		items = append(items, DrawerItem{
-			ID:        d.ID,
-			WingID:    wingID,
-			Type:      itemType,
-			Hall:      d.Hall,
-			ToolName:  d.ToolName,
-			Content:   d.Content,
-			CreatedAt: d.CreatedAt,
+			ID:         d.ID,
+			WingID:     d.WingID,
+			Type:       itemType,
+			Hall:       d.Hall,
+			ToolName:   d.ToolName,
+			Content:    d.Content,
+			SessionID:  d.SessionID,
+			CoversFrom: d.CoversFrom,
+			CoversTo:   d.CoversTo,
+			CreatedAt:  d.CreatedAt,
 		})
 	}
 	writeJSON(w, http.StatusOK, items)

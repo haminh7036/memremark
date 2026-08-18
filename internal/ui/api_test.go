@@ -176,8 +176,54 @@ func TestAPI_Timeline_Filters(t *testing.T) {
 	if err := json.NewDecoder(recVerbatim.Body).Decode(&verbatimItems); err != nil {
 		t.Fatalf("decode verbatim items: %v", err)
 	}
-	if len(verbatimItems) != 1 || verbatimItems[0].ToolName != "exec_cmd" {
+	if len(verbatimItems) != 1 || verbatimItems[0].ToolName != "exec_cmd" || verbatimItems[0].WingID != w1 || verbatimItems[0].SessionID != "s1" {
 		t.Fatalf("unexpected verbatim items: %+v", verbatimItems)
+	}
+}
+
+func TestAPI_Timeline_AllWorkspacesPreservesWingID(t *testing.T) {
+	store := setupTestStore(t)
+	defer store.Close()
+
+	w1, _ := store.GetOrCreateWing("/projects/proj-a")
+	w2, _ := store.GetOrCreateWing("/projects/proj-b")
+
+	now := time.Now().Truncate(time.Second)
+	coversFrom := now.Add(-time.Hour).Truncate(time.Second)
+	coversTo := now.Truncate(time.Second)
+
+	_ = store.InsertSummaryDrawer(w1, "session-1", storage.HallFact, "Fact on proj A", coversFrom, coversTo, now)
+	_ = store.InsertVerbatimDrawer(w2, "session-2", "Bash", "ls -la on proj B", now.Add(time.Second))
+
+	assets, err := Assets()
+	if err != nil {
+		t.Fatalf("Assets: %v", err)
+	}
+	srv := NewServer(store, assets)
+
+	// Query across all workspaces (wing_id=0 or omitted)
+	req := httptest.NewRequest(http.MethodGet, "/api/timeline?wing_id=0", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+
+	var items []DrawerItem
+	if err := json.NewDecoder(rec.Body).Decode(&items); err != nil {
+		t.Fatalf("decode timeline: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d: %+v", len(items), items)
+	}
+
+	// Results are ordered newest first (created_at DESC): item 0 is w2 verbatim, item 1 is w1 summary
+	if items[0].WingID != w2 || items[0].Type != "verbatim" || items[0].SessionID != "session-2" {
+		t.Fatalf("expected item 0 to have WingID=%d, Type=verbatim, SessionID=session-2, got %+v", w2, items[0])
+	}
+	if items[1].WingID != w1 || items[1].Type != "summary" || items[1].SessionID != "session-1" || items[1].CoversFrom != coversFrom.Unix() || items[1].CoversTo != coversTo.Unix() {
+		t.Fatalf("expected item 1 to have WingID=%d, Type=summary, SessionID=session-1, CoversFrom/To set, got %+v", w1, items[1])
 	}
 }
 

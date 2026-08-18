@@ -57,11 +57,16 @@ func (s *Store) InsertSummaryDrawer(wingID int64, sessionID, hall, content strin
 // Drawer is a single row read back from the drawers table. ToolName is
 // only populated for verbatim rows.
 type Drawer struct {
-	ID        int64
-	Hall      string
-	ToolName  string
-	Content   string
-	CreatedAt time.Time
+	ID         int64
+	WingID     int64
+	Type       string
+	Hall       string
+	ToolName   string
+	Content    string
+	SessionID  string
+	CoversFrom int64
+	CoversTo   int64
+	CreatedAt  time.Time
 }
 
 // whereClause joins conditions with AND, or returns "" if there are none.
@@ -73,20 +78,38 @@ func whereClause(conditions []string) string {
 	return "WHERE " + strings.Join(conditions, " AND ")
 }
 
-// scanDrawerRows reads every row of an `id, type, hall, tool_name, content,
-// created_at` result set into Drawers. Shared by SearchDrawers and
-// GetTimeline, which select those same columns in that same order.
+// scanDrawerRows reads every row of an `id, wing_id, type, hall, content, tool_name,
+// session_id, covers_from, covers_to, created_at` result set into Drawers. Shared by
+// SearchDrawers and GetTimeline, which select those same columns in that same order.
 func scanDrawerRows(rows *sql.Rows) ([]Drawer, error) {
 	var out []Drawer
 	for rows.Next() {
 		var d Drawer
-		var drawerType string
 		var toolName sql.NullString
+		var coversFrom sql.NullInt64
+		var coversTo sql.NullInt64
 		var createdAt int64
-		if err := rows.Scan(&d.ID, &drawerType, &d.Hall, &toolName, &d.Content, &createdAt); err != nil {
+		if err := rows.Scan(
+			&d.ID,
+			&d.WingID,
+			&d.Type,
+			&d.Hall,
+			&d.Content,
+			&toolName,
+			&d.SessionID,
+			&coversFrom,
+			&coversTo,
+			&createdAt,
+		); err != nil {
 			return nil, fmt.Errorf("storage: scan drawer row: %w", err)
 		}
 		d.ToolName = toolName.String
+		if coversFrom.Valid {
+			d.CoversFrom = coversFrom.Int64
+		}
+		if coversTo.Valid {
+			d.CoversTo = coversTo.Int64
+		}
 		d.CreatedAt = time.Unix(createdAt, 0)
 		out = append(out, d)
 	}
@@ -182,8 +205,8 @@ func (s *Store) LastSummaryCoversTo(wingID int64, sessionID string) (time.Time, 
 func (s *Store) SearchDrawers(wingID int64, query, hall, drawerType string, limit int) ([]Drawer, error) {
 	if limit <= 0 {
 		limit = 10
-	} else if limit > 50 {
-		limit = 50
+	} else if limit > 200 {
+		limit = 200
 	}
 
 	var conditions []string
@@ -207,7 +230,7 @@ func (s *Store) SearchDrawers(wingID int64, query, hall, drawerType string, limi
 	}
 
 	querySQL := fmt.Sprintf(
-		`SELECT id, type, hall, tool_name, content, created_at FROM drawers
+		`SELECT id, wing_id, type, hall, content, tool_name, session_id, covers_from, covers_to, created_at FROM drawers
 		 %s
 		 ORDER BY created_at DESC, id DESC LIMIT ?`,
 		whereClause(conditions),
@@ -268,7 +291,7 @@ func (s *Store) GetTimeline(wingID int64, sessionID string, since time.Time, lim
 	}
 
 	querySQL := fmt.Sprintf(
-		`SELECT id, type, hall, tool_name, content, created_at FROM drawers
+		`SELECT id, wing_id, type, hall, content, tool_name, session_id, covers_from, covers_to, created_at FROM drawers
 		 %s
 		 ORDER BY created_at ASC, id ASC LIMIT ?`,
 		whereClause(conditions),

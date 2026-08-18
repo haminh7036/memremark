@@ -80,7 +80,7 @@ function formatLastUpdated(date) {
               <div class="flex items-center gap-2">
                 <h1 class="text-base font-bold text-zinc-900 dark:text-zinc-50 tracking-tight">MemRemark</h1>
                 <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 border border-indigo-500/20">
-                  v0.1
+                  v1.1
                 </span>
               </div>
               <p class="text-xs text-zinc-500 dark:text-zinc-400 font-medium">Memory Dashboard & Timeline</p>
