@@ -10,6 +10,7 @@ build:
 	go build -o bin/memremarkd ./cmd/memremarkd
 	go build -o bin/memremark-hook-claude-sessionstart ./cmd/memremark-hook-claude-sessionstart
 	go build -o bin/memremark-hook-antigravity-preinvocation ./cmd/memremark-hook-antigravity-preinvocation
+	go build -o bin/memremark-mcp ./cmd/memremark-mcp
 
 test:
 	go test -v -race ./...

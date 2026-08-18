@@ -5,9 +5,11 @@ set -euo pipefail
 
 PREFIX="${PREFIX:-$HOME/.local}"
 BINDIR="$PREFIX/bin"
-SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
-GEMINI_HOOKS="$HOME/.gemini/config/hooks.json"
-CLAUDE_SETTINGS="$HOME/.claude/settings.json"
+SYSTEMD_USER_DIR="${SYSTEMD_USER_DIR:-$HOME/.config/systemd/user}"
+GEMINI_HOOKS="${GEMINI_HOOKS:-$HOME/.gemini/config/hooks.json}"
+GEMINI_MCP="${GEMINI_MCP:-$HOME/.gemini/config/mcp_config.json}"
+CLAUDE_SETTINGS="${CLAUDE_SETTINGS:-$HOME/.claude/settings.json}"
+CLAUDE_MCP="${CLAUDE_MCP:-$HOME/.claude/mcp.json}"
 
 CLI_TARGET="all"
 DO_UNINSTALL=false
@@ -19,19 +21,19 @@ usage() {
 Usage: ./install.sh [OPTIONS]
 
 Options:
-  --cli=TARGET      Which CLI hooks to patch: 'antigravity-cli', 'claude-code', or 'all' (default: all)
+  --cli=TARGET      Which CLI hooks & MCP servers to patch: 'antigravity-cli', 'claude-code', or 'all' (default: all)
                     Aliases: 'antigravity', 'agy', 'claude'
   --prefix=PATH     Installation prefix for binaries (default: \$HOME/.local)
-  --no-build        Skip binary build & install (only patch hooks)
+  --no-build        Skip binary build & install (only patch hooks & MCP servers)
   --no-service      Skip systemd service setup
-  --uninstall       Remove memremark binaries, systemd service, and unpatch hooks
+  --uninstall       Remove memremark binaries, systemd service, and unpatch hooks/MCP servers
   -h, --help        Show this help message
 
 Examples:
-  ./install.sh                                # Install everything (binaries, systemd, all hooks)
-  ./install.sh --cli=antigravity-cli          # Install & patch only Antigravity CLI hooks
-  ./install.sh --cli=claude-code              # Install & patch only Claude Code hooks
-  ./install.sh --uninstall                   # Remove all binaries, services, and hooks
+  ./install.sh                                # Install everything (binaries, systemd, all hooks & MCP servers)
+  ./install.sh --cli=antigravity-cli          # Install & patch only Antigravity CLI hooks & MCP
+  ./install.sh --cli=claude-code              # Install & patch only Claude Code hooks & MCP
+  ./install.sh --uninstall                   # Remove all binaries, services, hooks, and MCP configs
 EOF
     exit 0
 }
@@ -72,11 +74,17 @@ patch_json_py() {
     python3 -c "
 import sys, json, os, shutil
 
-action = sys.argv[1]   # 'patch-antigravity', 'patch-claude', 'unpatch-antigravity', 'unpatch-claude'
+action = sys.argv[1]   # 'patch-antigravity', 'patch-claude', 'unpatch-antigravity', 'unpatch-claude', 'patch-mcp', 'unpatch-mcp'
 file_path = os.path.expanduser(sys.argv[2])
 bindir = os.path.expanduser(sys.argv[3])
 
-os.makedirs(os.path.dirname(file_path), exist_ok=True)
+if not os.path.exists(file_path):
+    if action.startswith('unpatch'):
+        print(f'• File does not exist: {file_path}')
+        sys.exit(0)
+    dir_name = os.path.dirname(file_path)
+    if dir_name:
+        os.makedirs(dir_name, exist_ok=True)
 
 data = {}
 if os.path.exists(file_path):
@@ -165,7 +173,25 @@ elif action == 'unpatch-claude':
     else:
         print(f'• No memremark hook found in {file_path}')
 
-if changed or not os.path.exists(file_path):
+elif action == 'patch-mcp':
+    mcp_bin = os.path.join(bindir, 'memremark-mcp')
+    servers = data.setdefault('mcpServers', {})
+    servers['memremark'] = {
+        'command': mcp_bin
+    }
+    changed = True
+    print(f'✓ Patched MemRemark MCP server into {file_path}')
+
+elif action == 'unpatch-mcp':
+    servers = data.get('mcpServers', {})
+    if 'memremark' in servers:
+        del servers['memremark']
+        changed = True
+        print(f'✓ Removed MemRemark MCP server from {file_path}')
+    else:
+        print(f'• No MemRemark MCP server found in {file_path}')
+
+if changed:
     with open(file_path, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
         f.write('\n')
@@ -184,14 +210,17 @@ if [ "$DO_UNINSTALL" = true ]; then
         systemctl --user daemon-reload 2>/dev/null || true
     fi
 
-    # 2. Unpatch hooks
+    # 2. Unpatch hooks & MCP servers
     patch_json_py "unpatch-antigravity" "$GEMINI_HOOKS" "$BINDIR"
+    patch_json_py "unpatch-mcp" "$GEMINI_MCP" "$BINDIR"
     patch_json_py "unpatch-claude" "$CLAUDE_SETTINGS" "$BINDIR"
+    patch_json_py "unpatch-mcp" "$CLAUDE_MCP" "$BINDIR"
 
     # 3. Remove binaries
     rm -f "$BINDIR/memremarkd" \
           "$BINDIR/memremark-hook-claude-sessionstart" \
-          "$BINDIR/memremark-hook-antigravity-preinvocation"
+          "$BINDIR/memremark-hook-antigravity-preinvocation" \
+          "$BINDIR/memremark-mcp"
     
     echo "✓ MemRemark successfully uninstalled."
     exit 0
@@ -208,10 +237,12 @@ if [ "$DO_BUILD" = true ]; then
     go build -o "$REPO_DIR/bin/memremarkd" ./cmd/memremarkd
     go build -o "$REPO_DIR/bin/memremark-hook-claude-sessionstart" ./cmd/memremark-hook-claude-sessionstart
     go build -o "$REPO_DIR/bin/memremark-hook-antigravity-preinvocation" ./cmd/memremark-hook-antigravity-preinvocation
+    go build -o "$REPO_DIR/bin/memremark-mcp" ./cmd/memremark-mcp
 
     install -m 755 "$REPO_DIR/bin/memremarkd" "$BINDIR/memremarkd"
     install -m 755 "$REPO_DIR/bin/memremark-hook-claude-sessionstart" "$BINDIR/memremark-hook-claude-sessionstart"
     install -m 755 "$REPO_DIR/bin/memremark-hook-antigravity-preinvocation" "$BINDIR/memremark-hook-antigravity-preinvocation"
+    install -m 755 "$REPO_DIR/bin/memremark-mcp" "$BINDIR/memremark-mcp"
     echo "✓ Binaries installed to $BINDIR"
 fi
 
@@ -224,17 +255,21 @@ if [ "$DO_SERVICE" = true ] && command -v systemctl &>/dev/null; then
     echo "✓ Systemd service 'memremarkd.service' enabled and started."
 fi
 
-# 3. Patch hooks based on --cli target
+# 3. Patch hooks & MCP configuration based on --cli target
 case "$CLI_TARGET" in
     antigravity|antigravity-cli|agy)
         patch_json_py "patch-antigravity" "$GEMINI_HOOKS" "$BINDIR"
+        patch_json_py "patch-mcp" "$GEMINI_MCP" "$BINDIR"
         ;;
     claude|claude-code)
         patch_json_py "patch-claude" "$CLAUDE_SETTINGS" "$BINDIR"
+        patch_json_py "patch-mcp" "$CLAUDE_MCP" "$BINDIR"
         ;;
     all)
         patch_json_py "patch-antigravity" "$GEMINI_HOOKS" "$BINDIR"
+        patch_json_py "patch-mcp" "$GEMINI_MCP" "$BINDIR"
         patch_json_py "patch-claude" "$CLAUDE_SETTINGS" "$BINDIR"
+        patch_json_py "patch-mcp" "$CLAUDE_MCP" "$BINDIR"
         ;;
     *)
         echo "Error: Unknown CLI target '$CLI_TARGET'. Use 'antigravity-cli', 'claude-code', or 'all'." >&2

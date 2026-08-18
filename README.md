@@ -16,15 +16,19 @@ Mỗi lần cần thảo luận hay gì thi phải nói lại toàn bộ lịch 
 **Tự động** lưu trữ, trích xuất và duy trì liền mạch cuộc trò chuyện và kiến thức được đúc kết lại qua toàn bộ các thiết bị mà không bị ngắt quãng.
 
 ## Tiến độ
-Chia làm 2 phần: **Core Engine** (trên 1 máy) làm trước, **Sync Layer** (đồng bộ đa thiết bị) làm sau.
-**Core Engine đã cài đặt xong và qua review đầy đủ** (11 task theo kế hoạch + 1 vòng final review chia 4 mảng, tìm và sửa 5 lỗi Critical + 6 lỗi Important). Xem thiết kế tại `docs/superpowers/specs/2026-08-10-core-engine-design.md` (bản tiếng Việt: `2026-08-10-core-engine-design-vi.md`) và kế hoạch triển khai tại `docs/superpowers/plans/2026-08-10-core-engine-implementation.md`. Sync Layer chưa bắt đầu.
+Chia làm 2 phần: **Core Engine & MCP Server** (trên 1 máy) làm trước, **Sync Layer** (đồng bộ đa thiết bị) làm sau.
+- **Core Engine & MCP Server đã hoàn thiện và kiểm thử đầy đủ** (hỗ trợ Hook injection và Model Context Protocol stdio server với 4 tools).
+- Sync Layer chưa bắt đầu.
 
 ## Cài đặt nhanh (Khuyến nghị)
 
 Script `install.sh` sẽ tự động:
-1. Build các binary và cài đặt vào `~/.local/bin/`
+1. Build 4 binary (`memremarkd`, `memremark-hook-claude-sessionstart`, `memremark-hook-antigravity-preinvocation`, `memremark-mcp`) và cài đặt vào `~/.local/bin/`
 2. Cài đặt và bật `systemd user service` để daemon tự chạy nền
-3. **Smart patch** cấu hình hook vào `~/.gemini/config/hooks.json` và `~/.claude/settings.json` (tự tạo backup `.bak`, giữ nguyên các hook/settings khác).
+3. **Smart patch** cấu hình hook và MCP server:
+   - **Antigravity CLI**: Hook `PreInvocation` vào `~/.gemini/config/hooks.json` và MCP server `memremark` vào `~/.gemini/config/mcp_config.json`
+   - **Claude Code**: Hook `SessionStart` vào `~/.claude/settings.json` và MCP server `memremark` vào `~/.claude/mcp.json`
+   (Tự tạo bản sao lưu `.bak`, giữ nguyên các cấu hình/hook/MCP server khác).
 
 ```bash
 # Cài đặt toàn bộ (cho cả Antigravity CLI và Claude Code):
@@ -36,7 +40,7 @@ Script `install.sh` sẽ tự động:
 # Hoặc chỉ cấu hình riêng cho Claude Code:
 ./install.sh --cli=claude-code
 
-# Để gỡ cài đặt hoàn toàn (gỡ service, xóa binary, gỡ hook):
+# Để gỡ cài đặt hoàn toàn (gỡ service, xóa binary, gỡ hook & MCP server):
 ./install.sh --uninstall
 ```
 
@@ -52,19 +56,50 @@ Các lệnh quản lý daemon:
 
 ---
 
+## MCP Server & Tools
+
+`memremark-mcp` cung cấp giao thức **Model Context Protocol (MCP)** qua stdio kết nối trực tiếp với SQLite database, cho phép AI Agent chủ động tra cứu, ghi nhớ và quản lý ký ức theo ngữ cảnh dự án.
+
+### Danh sách công cụ (Tools)
+
+1. **`search_memory`**: Tìm kiếm ký ức theo từ khóa, danh mục hall, loại drawer hoặc workspace.
+   - `query` *(string)*: Từ khóa tìm kiếm trong nội dung.
+   - `hall` *(string, optional)*: Lọc theo danh mục (`discovery`, `decision`, `fact`, `advice`, `preference`, `warning`, `insight`).
+   - `type` *(string, optional)*: Lọc theo loại drawer (`summary`, `verbatim`, hoặc `all`).
+   - `wing_path` *(string, optional)*: Đường dẫn thư mục workspace (mặc định: thư mục hiện tại).
+   - `limit` *(integer, optional)*: Số lượng kết quả tối đa (mặc định: 10, tối đa: 50).
+
+2. **`remember`**: Ghi nhớ tường minh một bài học, quy ước, quyết định hoặc phát hiện mới vào database.
+   - `content` *(string, required)*: Nội dung cần ghi nhớ.
+   - `hall` *(string, required)*: Phân loại ký ức (`discovery`, `decision`, `fact`, `advice`, `preference`, `warning`, `insight`).
+   - `wing_path` *(string, optional)*: Đường dẫn thư mục workspace (mặc định: thư mục hiện tại).
+
+3. **`get_timeline`**: Xem dòng thời gian chi tiết các sự kiện/tóm tắt diễn ra theo thứ tự thời gian.
+   - `session_id` *(string, optional)*: Lọc theo ID phiên làm việc cụ thể.
+   - `wing_path` *(string, optional)*: Đường dẫn thư mục workspace (mặc định: thư mục hiện tại).
+   - `since` *(integer, optional)*: Mốc Unix timestamp để lấy các sự kiện sau thời điểm đó.
+   - `limit` *(integer, optional)*: Số lượng sự kiện tối đa (mặc định: 20, tối đa: 100).
+
+4. **`forget_memory`**: Xóa một drawer ký ức lỗi thời hoặc sai lệch theo ID.
+   - `id` *(integer, required)*: ID của drawer cần xóa.
+
+---
+
 ## Đường dẫn mặc định
 
 | Mục | Đường dẫn | Mô tả |
 | :--- | :--- | :--- |
 | **Database** | `~/.memremark/memremark.db` | Lưu trữ SQLite: danh sách wing, quan sát verbatim, tóm tắt và watermark |
-| **Binaries** | `~/.local/bin/memremarkd`<br>`~/.local/bin/memremark-hook-antigravity-preinvocation`<br>`~/.local/bin/memremark-hook-claude-sessionstart` | File thực thi chính sau khi cài đặt |
+| **Binaries** | `~/.local/bin/memremarkd`<br>`~/.local/bin/memremark-hook-antigravity-preinvocation`<br>`~/.local/bin/memremark-hook-claude-sessionstart`<br>`~/.local/bin/memremark-mcp` | File thực thi sau khi cài đặt |
 | **Systemd** | `~/.config/systemd/user/memremarkd.service` | Quản lý tiến trình daemon tự khởi động |
-| **Hook Antigravity** | `~/.gemini/config/hooks.json` (hoặc `.agents/hooks.json`) | Cấu hình hook `PreInvocation` |
-| **Hook Claude Code** | `~/.claude/settings.json` (hoặc `.claude/settings.json`) | Cấu hình hook `SessionStart` |
+| **Hook Antigravity** | `~/.gemini/config/hooks.json` | Cấu hình hook `PreInvocation` |
+| **MCP Antigravity** | `~/.gemini/config/mcp_config.json` | Cấu hình MCP server cho Antigravity CLI |
+| **Hook Claude Code** | `~/.claude/settings.json` | Cấu hình hook `SessionStart` |
+| **MCP Claude Code** | `~/.claude/mcp.json` | Cấu hình MCP server cho Claude Code |
 
 ---
 
-## Cấu hình Hooks thủ công (Manual)
+## Cấu hình Hooks & MCP thủ công (Manual)
 
 Nếu không sử dụng `install.sh`, bạn có thể build và cấu hình thủ công:
 
@@ -73,6 +108,7 @@ Nếu không sử dụng `install.sh`, bạn có thể build và cấu hình th�
 go build -o memremarkd ./cmd/memremarkd
 go build -o memremark-hook-claude-sessionstart ./cmd/memremark-hook-claude-sessionstart
 go build -o memremark-hook-antigravity-preinvocation ./cmd/memremark-hook-antigravity-preinvocation
+go build -o memremark-mcp ./cmd/memremark-mcp
 ```
 
 ### 2. Cài hook cho Claude Code
@@ -96,7 +132,20 @@ Thêm vào `~/.claude/settings.json`:
 }
 ```
 
-### 3. Cài hook cho Antigravity CLI
+### 3. Cài MCP server cho Claude Code
+Thêm vào `~/.claude/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "memremark": {
+      "command": "/duong/dan/toi/memremark-mcp"
+    }
+  }
+}
+```
+
+### 4. Cài hook cho Antigravity CLI
 Thêm vào `~/.gemini/config/hooks.json`:
 
 ```json
@@ -109,6 +158,19 @@ Thêm vào `~/.gemini/config/hooks.json`:
         "timeout": 5
       }
     ]
+  }
+}
+```
+
+### 5. Cài MCP server cho Antigravity CLI
+Thêm vào `~/.gemini/config/mcp_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "memremark": {
+      "command": "/duong/dan/toi/memremark-mcp"
+    }
   }
 }
 ```
