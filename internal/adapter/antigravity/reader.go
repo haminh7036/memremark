@@ -2,7 +2,10 @@ package antigravity
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"net/url"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -10,6 +13,38 @@ import (
 
 	"github.com/haminh7036/memremark/internal/observation"
 )
+
+// ExtractWorkspacePath parses a workspace URI string from Antigravity CLI's
+// conversation_summaries table (which is commonly formatted as a JSON array
+// of file:// URIs, e.g. `["file:///home/user/project"]` or `file:///home/user/project`)
+// and returns a clean, canonical absolute filesystem path (e.g. `/home/user/project`).
+func ExtractWorkspacePath(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if strings.HasPrefix(raw, "[") {
+		var uris []string
+		if err := json.Unmarshal([]byte(raw), &uris); err == nil && len(uris) > 0 {
+			raw = uris[0]
+		} else {
+			raw = strings.TrimPrefix(raw, "[")
+			raw = strings.TrimSuffix(raw, "]")
+			raw = strings.Trim(raw, `"' `)
+		}
+	}
+	if strings.HasPrefix(raw, "file://") {
+		if u, err := url.Parse(raw); err == nil {
+			raw = u.Path
+		} else {
+			raw = strings.TrimPrefix(raw, "file://")
+		}
+	}
+	if raw == "" {
+		return ""
+	}
+	return filepath.Clean(raw)
+}
 
 // openReadOnly opens an Antigravity CLI SQLite database that agy itself
 // may still be actively writing to, using SQLite's read-only URI mode
@@ -104,6 +139,7 @@ func ListConversations(summariesDBPath string) ([]ConversationInfo, error) {
 // partially-advanced value), so a caller that forgets to check err cannot
 // silently skip rows by using it.
 func ReadObservations(conversationDBPath, wingPath, sessionID string, at time.Time, sinceIdx int64) (obs []observation.Observation, maxIdx int64, err error) {
+	wingPath = ExtractWorkspacePath(wingPath)
 	db, err := openReadOnly(conversationDBPath)
 	if err != nil {
 		return nil, sinceIdx, err

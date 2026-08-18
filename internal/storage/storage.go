@@ -76,6 +76,11 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("storage: apply schema: %w", err)
 	}
+	// Migrate any legacy URI or unnormalized paths in the wings table
+	if err := migrateLegacyWings(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("storage: migrate legacy wings: %w", err)
+	}
 	// Unconditional: cheap, and simpler than tracking whether the file was
 	// freshly created this call.
 	if err := os.Chmod(path, 0o600); err != nil {
@@ -83,6 +88,61 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("storage: chmod %s: %w", path, err)
 	}
 	return &Store{db: db}, nil
+}
+
+// migrateLegacyWings normalizes any raw URI paths in the wings table and merges duplicates.
+func migrateLegacyWings(db *sql.DB) error {
+	rows, err := db.Query(`SELECT id, path FROM wings WHERE path LIKE '["file://%' OR path LIKE 'file://%' OR path LIKE '["/%'`)
+	if err != nil {
+		return fmt.Errorf("query legacy wings: %w", err)
+	}
+	defer rows.Close()
+
+	type wingFix struct {
+		oldID     int64
+		oldPath   string
+		cleanPath string
+	}
+	var fixes []wingFix
+	for rows.Next() {
+		var id int64
+		var oldPath string
+		if err := rows.Scan(&id, &oldPath); err != nil {
+			return fmt.Errorf("scan legacy wing: %w", err)
+		}
+		cleanPath := normalizePath(oldPath)
+		if cleanPath != "" && cleanPath != oldPath {
+			fixes = append(fixes, wingFix{oldID: id, oldPath: oldPath, cleanPath: cleanPath})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	for _, f := range fixes {
+		var existingID int64
+		err := db.QueryRow(`SELECT id FROM wings WHERE path = ?`, f.cleanPath).Scan(&existingID)
+		if err == sql.ErrNoRows {
+			cleanName := filepath.Base(f.cleanPath)
+			if cleanName == "." || cleanName == "/" || cleanName == "" {
+				cleanName = f.cleanPath
+			}
+			if _, err := db.Exec(`UPDATE wings SET path = ?, name = ? WHERE id = ?`, f.cleanPath, cleanName, f.oldID); err != nil {
+				return fmt.Errorf("update legacy wing %d: %w", f.oldID, err)
+			}
+		} else if err == nil {
+			// Merge duplicates: re-point drawers from oldID to existingID, then delete old wing
+			if _, err := db.Exec(`UPDATE drawers SET wing_id = ? WHERE wing_id = ?`, existingID, f.oldID); err != nil {
+				return fmt.Errorf("re-point drawers from wing %d to %d: %w", f.oldID, existingID, err)
+			}
+			if _, err := db.Exec(`DELETE FROM wings WHERE id = ?`, f.oldID); err != nil {
+				return fmt.Errorf("delete duplicate wing %d: %w", f.oldID, err)
+			}
+		} else {
+			return fmt.Errorf("check existing wing for %s: %w", f.cleanPath, err)
+		}
+	}
+	return nil
 }
 
 // Close releases the underlying database handle.

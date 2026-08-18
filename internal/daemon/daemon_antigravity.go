@@ -45,7 +45,8 @@ func (d *Daemon) pollAntigravity(now time.Time) error {
 	}
 
 	for _, conv := range convs {
-		if conv.WorkspaceURIs == "" {
+		cleanWingPath := antigravity.ExtractWorkspacePath(conv.WorkspaceURIs)
+		if cleanWingPath == "" {
 			continue
 		}
 		dbPath := filepath.Join(filepath.Dir(d.antigravitySummariesDB), "conversations", conv.ID+".db")
@@ -70,7 +71,7 @@ func (d *Daemon) pollAntigravity(now time.Time) error {
 				sinceIdx = persisted
 			}
 		}
-		obs, maxIdx, err := antigravity.ReadObservations(dbPath, conv.WorkspaceURIs, conv.ID, conv.LastModified, sinceIdx)
+		obs, maxIdx, err := antigravity.ReadObservations(dbPath, cleanWingPath, conv.ID, conv.LastModified, sinceIdx)
 		if err != nil {
 			// Task 8's code review flagged this: on a mid-scan error, maxIdx may
 			// already be advanced past rows that weren't returned in obs. Do NOT

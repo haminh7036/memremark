@@ -257,3 +257,56 @@ func TestOpenReadOnlyFailsCleanlyOnMissingPath(t *testing.T) {
 		t.Fatalf("unexpected stat error checking for created file: %v", statErr)
 	}
 }
+
+func TestExtractWorkspacePath(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "empty",
+			input:    "",
+			expected: "",
+		},
+		{
+			name:     "whitespace only",
+			input:    "   \n\t  ",
+			expected: "",
+		},
+		{
+			name:     "json array with file uri",
+			input:    `["file:///home/minh/personal/memremark"]`,
+			expected: "/home/minh/personal/memremark",
+		},
+		{
+			name:     "json array with multiple uris picks first",
+			input:    `["file:///home/minh/personal/proj1", "file:///home/minh/personal/proj2"]`,
+			expected: "/home/minh/personal/proj1",
+		},
+		{
+			name:     "single file uri",
+			input:    "file:///home/minh/rcvn/VN_SG/RBM_Batch_Product_Rakuten",
+			expected: "/home/minh/rcvn/VN_SG/RBM_Batch_Product_Rakuten",
+		},
+		{
+			name:     "plain filesystem path",
+			input:    "/home/minh/personal/memremark",
+			expected: "/home/minh/personal/memremark",
+		},
+		{
+			name:     "malformed json array with brackets",
+			input:    `["file:///tmp/something"]`,
+			expected: "/tmp/something",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ExtractWorkspacePath(tc.input)
+			if got != tc.expected {
+				t.Fatalf("ExtractWorkspacePath(%q) = %q, expected %q", tc.input, got, tc.expected)
+			}
+		})
+	}
+}
