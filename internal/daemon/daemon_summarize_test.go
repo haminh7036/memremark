@@ -2,12 +2,15 @@ package daemon
 
 import (
 	"context"
+	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/haminh7036/memremark/internal/observation"
 	"github.com/haminh7036/memremark/internal/storage"
+	"github.com/haminh7036/memremark/internal/summarizer"
 )
 
 // recordingInvoker remembers every batch of observations it was asked to
@@ -111,4 +114,61 @@ func TestSummarizeSessionChunksLargeBacklogAcrossMultipleInvokerCalls(t *testing
 func tempDBPath(t *testing.T) string {
 	t.Helper()
 	return t.TempDir() + "/memremark.db"
+}
+
+func TestDaemon_SummarizeSession_FallbackIntegration(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "memremark.db")
+	store, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+
+	primary := &stubInvoker{err: errors.New("claude -p 429 quota exceeded")}
+	fallback := &stubInvoker{reply: `[{"hall":"fact","content":"fallback worked"}]`}
+	fallbackTriggered := false
+
+	invoker := summarizer.FallbackInvoker{
+		Primary:  primary,
+		Fallback: fallback,
+		OnFallback: func(err error) {
+			fallbackTriggered = true
+		},
+	}
+
+	d := New(store, t.TempDir(), filepath.Join(t.TempDir(), "antigravity.db"), invoker, invoker)
+
+	now := time.Now()
+	obs := observation.Observation{
+		SessionID: "session-fallback-test",
+		WingPath:  "/test/ws",
+		ToolName:  "ViewFile",
+		Content:   "viewed file",
+		Timestamp: now,
+	}
+
+	if err := d.recordObservation(obs, invoker, now); err != nil {
+		t.Fatalf("recordObservation: %v", err)
+	}
+
+	if err := d.summarizeSession(context.Background(), obs.SessionID, now); err != nil {
+		t.Fatalf("summarizeSession: %v", err)
+	}
+
+	if !fallbackTriggered {
+		t.Fatalf("expected fallback callback to have triggered")
+	}
+
+	wingID, err := store.GetOrCreateWing("/test/ws")
+	if err != nil {
+		t.Fatalf("GetOrCreateWing: %v", err)
+	}
+
+	drawers, err := store.RecentSummaries(wingID, 10)
+	if err != nil {
+		t.Fatalf("RecentSummaries: %v", err)
+	}
+	if len(drawers) != 1 || drawers[0].Content != "fallback worked" || drawers[0].Hall != "fact" {
+		t.Fatalf("expected 1 drawer with content 'fallback worked' in hall 'fact', got: %+v", drawers)
+	}
 }

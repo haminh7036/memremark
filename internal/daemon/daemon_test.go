@@ -18,9 +18,15 @@ import (
 	"github.com/haminh7036/memremark/internal/storage"
 )
 
-type stubInvoker struct{ reply string }
+type stubInvoker struct {
+	reply string
+	err   error
+}
 
 func (s stubInvoker) Invoke(ctx context.Context, prompt string) (string, error) {
+	if s.err != nil {
+		return "", s.err
+	}
 	return s.reply, nil
 }
 
