@@ -130,3 +130,79 @@ func TestLoad_PartialJSONPreservesOtherDefaults(t *testing.T) {
 		t.Errorf("expected default antigravity_effort %q, got %q", DefaultAntigravityEffort, cfg.Summarizer.AntigravityEffort)
 	}
 }
+
+func TestConfig_UIDefaults(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.UI.Host != DefaultUIHost {
+		t.Errorf("expected default UI host %q, got %q", DefaultUIHost, cfg.UI.Host)
+	}
+	if cfg.UI.Port != DefaultUIPort {
+		t.Errorf("expected default UI port %d, got %d", DefaultUIPort, cfg.UI.Port)
+	}
+	if !cfg.UI.AutoOpen {
+		t.Errorf("expected default UI auto_open true, got %v", cfg.UI.AutoOpen)
+	}
+}
+
+func TestConfig_UICustomJSON(t *testing.T) {
+	tmpDir := t.TempDir()
+	memDir := filepath.Join(tmpDir, ".memremark")
+	if err := os.MkdirAll(memDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	jsonContent := `{
+		"ui": {
+			"host": "0.0.0.0",
+			"port": 9090,
+			"auto_open": false
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(memDir, "config.json"), []byte(jsonContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+	if cfg.UI.Host != "0.0.0.0" {
+		t.Errorf("expected custom UI host '0.0.0.0', got %q", cfg.UI.Host)
+	}
+	if cfg.UI.Port != 9090 {
+		t.Errorf("expected custom UI port 9090, got %d", cfg.UI.Port)
+	}
+	if cfg.UI.AutoOpen != false {
+		t.Errorf("expected custom UI auto_open false, got %v", cfg.UI.AutoOpen)
+	}
+}
+
+func TestConfig_UIEnvOverrides(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("MEMREMARK_UI_HOST", "0.0.0.0")
+	t.Setenv("MEMREMARK_UI_PORT", "9999")
+
+	cfg, err := Load(tmpDir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.UI.Host != "0.0.0.0" {
+		t.Errorf("expected env UI host '0.0.0.0', got %q", cfg.UI.Host)
+	}
+	if cfg.UI.Port != 9999 {
+		t.Errorf("expected env UI port 9999, got %d", cfg.UI.Port)
+	}
+}
+
+func TestConfig_UIInvalidPortEnv(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("MEMREMARK_UI_PORT", "invalid-port")
+
+	cfg, err := Load(tmpDir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.UI.Port != DefaultUIPort {
+		t.Errorf("expected default UI port %d when invalid env provided, got %d", DefaultUIPort, cfg.UI.Port)
+	}
+}
+

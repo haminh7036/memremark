@@ -6,12 +6,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 )
 
 const (
 	DefaultClaudeModel       = "haiku"
 	DefaultAntigravityModel  = "gemini-3.7-flash-low"
 	DefaultAntigravityEffort = "low"
+	DefaultUIHost            = "127.0.0.1"
+	DefaultUIPort            = 8765
 )
 
 // SummarizerConfig specifies model parameters for headless distillers.
@@ -21,9 +24,17 @@ type SummarizerConfig struct {
 	AntigravityEffort string `json:"antigravity_effort"`
 }
 
+// UIConfig specifies settings for the web dashboard.
+type UIConfig struct {
+	Host     string `json:"host"`
+	Port     int    `json:"port"`
+	AutoOpen bool   `json:"auto_open"`
+}
+
 // Config represents the root configuration for MemRemark.
 type Config struct {
 	Summarizer SummarizerConfig `json:"summarizer"`
+	UI         UIConfig         `json:"ui"`
 }
 
 // DefaultConfig returns a Config struct with recommended low-cost defaults.
@@ -33,6 +44,11 @@ func DefaultConfig() Config {
 			ClaudeModel:       DefaultClaudeModel,
 			AntigravityModel:  DefaultAntigravityModel,
 			AntigravityEffort: DefaultAntigravityEffort,
+		},
+		UI: UIConfig{
+			Host:     DefaultUIHost,
+			Port:     DefaultUIPort,
+			AutoOpen: true,
 		},
 	}
 }
@@ -66,6 +82,14 @@ func LoadFromFile(filePath string) (Config, error) {
 	}
 	if env := os.Getenv("MEMREMARK_ANTIGRAVITY_EFFORT"); env != "" {
 		cfg.Summarizer.AntigravityEffort = env
+	}
+	if env := os.Getenv("MEMREMARK_UI_HOST"); env != "" {
+		cfg.UI.Host = env
+	}
+	if env := os.Getenv("MEMREMARK_UI_PORT"); env != "" {
+		if p, err := strconv.Atoi(env); err == nil && p > 0 {
+			cfg.UI.Port = p
+		}
 	}
 
 	return cfg, nil
