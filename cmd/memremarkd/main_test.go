@@ -7,8 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/haminh7036/memremark/internal/config"
 	"github.com/haminh7036/memremark/internal/daemon"
 	"github.com/haminh7036/memremark/internal/storage"
+	"github.com/haminh7036/memremark/internal/summarizer"
 )
 
 // blockingInvoker mimics exec.CommandContext's real behavior for a hung
@@ -74,3 +76,67 @@ func TestPollBoundsAHungInvokerToTheGivenTimeout(t *testing.T) {
 		t.Fatalf("poll took %v, expected it to return within %v of the %v timeout", elapsed, bound, shortTimeout)
 	}
 }
+
+func TestConfigWiringAndInvokerSetup(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, ".memremark")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+
+	customConfig := `{
+		"summarizer": {
+			"claude_model": "claude-3-5-haiku-custom",
+			"antigravity_model": "gemini-custom",
+			"antigravity_effort": "medium"
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(customConfig), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := config.Load(dir)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+
+	if cfg.Summarizer.ClaudeModel != "claude-3-5-haiku-custom" {
+		t.Errorf("expected claude_model custom, got %s", cfg.Summarizer.ClaudeModel)
+	}
+	if cfg.Summarizer.AntigravityModel != "gemini-custom" {
+		t.Errorf("expected antigravity_model custom, got %s", cfg.Summarizer.AntigravityModel)
+	}
+	if cfg.Summarizer.AntigravityEffort != "medium" {
+		t.Errorf("expected antigravity_effort medium, got %s", cfg.Summarizer.AntigravityEffort)
+	}
+
+	store, err := storage.Open(filepath.Join(dir, "memremark.db"))
+	if err != nil {
+		t.Fatalf("storage.Open: %v", err)
+	}
+	defer store.Close()
+
+	claudePrimary := summarizer.ClaudeCodeInvoker{
+		Model: cfg.Summarizer.ClaudeModel,
+	}
+	antigravityPrimary := summarizer.AntigravityInvoker{
+		Model:  cfg.Summarizer.AntigravityModel,
+		Effort: cfg.Summarizer.AntigravityEffort,
+	}
+
+	claudeInvoker := summarizer.FallbackInvoker{
+		Primary:  claudePrimary,
+		Fallback: antigravityPrimary,
+	}
+
+	antigravityInvoker := summarizer.FallbackInvoker{
+		Primary:  antigravityPrimary,
+		Fallback: claudePrimary,
+	}
+
+	d := daemon.New(store, filepath.Join(dir, "claude"), filepath.Join(dir, "agy.db"), claudeInvoker, antigravityInvoker)
+	if d == nil {
+		t.Fatal("expected non-nil daemon instance")
+	}
+}
+

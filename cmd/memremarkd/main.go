@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/haminh7036/memremark/internal/config"
 	"github.com/haminh7036/memremark/internal/daemon"
 	"github.com/haminh7036/memremark/internal/storage"
 	"github.com/haminh7036/memremark/internal/summarizer"
@@ -28,6 +29,12 @@ func main() {
 		log.Fatalf("memremarkd: resolve home dir: %v", err)
 	}
 
+	cfg, err := config.Load(home)
+	if err != nil {
+		log.Printf("memremarkd: warning: failed to load config (%v), using defaults", err)
+		cfg = config.DefaultConfig()
+	}
+
 	store, err := storage.Open(filepath.Join(home, ".memremark", "memremark.db"))
 	if err != nil {
 		log.Fatalf("memremarkd: open storage: %v", err)
@@ -37,17 +44,25 @@ func main() {
 	claudeProjectsRoot := filepath.Join(home, ".claude", "projects")
 	antigravitySummariesDB := filepath.Join(home, ".gemini", "antigravity-cli", "conversation_summaries.db")
 
+	claudePrimary := summarizer.ClaudeCodeInvoker{
+		Model: cfg.Summarizer.ClaudeModel,
+	}
+	antigravityPrimary := summarizer.AntigravityInvoker{
+		Model:  cfg.Summarizer.AntigravityModel,
+		Effort: cfg.Summarizer.AntigravityEffort,
+	}
+
 	claudeInvoker := summarizer.FallbackInvoker{
-		Primary:  summarizer.ClaudeCodeInvoker{},
-		Fallback: summarizer.AntigravityInvoker{},
+		Primary:  claudePrimary,
+		Fallback: antigravityPrimary,
 		OnFallback: func(err error) {
 			log.Printf("memremarkd: claude summarizer failed (%v), falling back to antigravity", err)
 		},
 	}
 
 	antigravityInvoker := summarizer.FallbackInvoker{
-		Primary:  summarizer.AntigravityInvoker{},
-		Fallback: summarizer.ClaudeCodeInvoker{},
+		Primary:  antigravityPrimary,
+		Fallback: claudePrimary,
 		OnFallback: func(err error) {
 			log.Printf("memremarkd: antigravity summarizer failed (%v), falling back to claude", err)
 		},
@@ -62,7 +77,9 @@ func main() {
 	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
 
-	log.Println("memremarkd: started, polling every 3s")
+	log.Printf("memremarkd: started, polling every 3s (claude_model=%s, antigravity_model=%s, antigravity_effort=%s)",
+		cfg.Summarizer.ClaudeModel, cfg.Summarizer.AntigravityModel, cfg.Summarizer.AntigravityEffort)
+
 	for {
 		select {
 		case <-ctx.Done():
