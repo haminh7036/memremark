@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 
+	"github.com/haminh7036/memremark/internal/hookctx"
 	"github.com/haminh7036/memremark/internal/storage"
 )
 
@@ -43,25 +43,7 @@ func run() ([]storage.Drawer, error) {
 	if err != nil {
 		return nil, err
 	}
-	return getSummaries(cwd, home)
-}
-
-func getSummaries(cwd, home string) ([]storage.Drawer, error) {
-	store, err := storage.Open(filepath.Join(home, ".memremark", "memremark.db"))
-	if err != nil {
-		return nil, err
-	}
-	defer store.Close()
-
-	wingID, err := store.GetOrCreateWing(cwd)
-	if err != nil {
-		return nil, err
-	}
-	summaries, err := store.RecentSummaries(wingID, 10)
-	if err != nil {
-		return nil, err
-	}
-	return summaries, nil
+	return hookctx.GetSummaries(cwd, home)
 }
 
 func buildOutput(summaries []storage.Drawer) hookOutput {
@@ -71,15 +53,7 @@ func buildOutput(summaries []storage.Drawer) hookOutput {
 	return hookOutput{
 		HookSpecificOutput: &hookSpecificOutput{
 			HookEventName:     "SessionStart",
-			AdditionalContext: formatSummaries(summaries),
+			AdditionalContext: hookctx.FormatSummaries(summaries),
 		},
 	}
-}
-
-func formatSummaries(summaries []storage.Drawer) string {
-	out := "Bối cảnh từ các phiên làm việc trước (memremark):\n"
-	for _, d := range summaries {
-		out += fmt.Sprintf("- [%s] %s\n", d.Hall, d.Content)
-	}
-	return out
 }

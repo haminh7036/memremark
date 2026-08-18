@@ -11,20 +11,6 @@ import (
 	"github.com/haminh7036/memremark/internal/storage"
 )
 
-func TestFormatSummariesIncludesHallAndContent(t *testing.T) {
-	summaries := []storage.Drawer{
-		{Hall: storage.HallFact, Content: "chose SQLite for v1"},
-		{Hall: storage.HallDiscovery, Content: "agy hooks don't execute"},
-	}
-	out := formatSummaries(summaries)
-	if !strings.Contains(out, "chose SQLite for v1") {
-		t.Fatalf("expected output to include first summary, got %q", out)
-	}
-	if !strings.Contains(out, "agy hooks don't execute") {
-		t.Fatalf("expected output to include second summary, got %q", out)
-	}
-}
-
 func TestBuildOutputOmitsHookSpecificOutputWhenNoSummaries(t *testing.T) {
 	out := buildOutput(nil)
 	if out.HookSpecificOutput != nil {
@@ -59,17 +45,6 @@ func TestBuildOutputNilOmitsHookSpecificOutputFromJSON(t *testing.T) {
 
 	if _, has := result["hookSpecificOutput"]; has {
 		t.Fatalf("hookSpecificOutput should be omitted from JSON when nil, but it's present in: %s", string(bytes))
-	}
-}
-
-func TestGetSummariesReturnsNilOnStorageOpenError(t *testing.T) {
-	// Pass a path where storage.Open will fail
-	summaries, err := getSummaries(".", "/nonexistent/1234567890/memremark.db")
-	if err == nil {
-		t.Fatalf("expected error when storage path is broken, got nil")
-	}
-	if summaries != nil {
-		t.Fatalf("expected nil summaries on error, got %v", summaries)
 	}
 }
 

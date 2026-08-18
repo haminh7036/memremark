@@ -63,6 +63,35 @@ type Drawer struct {
 	CreatedAt time.Time
 }
 
+// whereClause joins conditions with AND, or returns "" if there are none.
+// Shared by SearchDrawers and GetTimeline, whose filters otherwise differ.
+func whereClause(conditions []string) string {
+	if len(conditions) == 0 {
+		return ""
+	}
+	return "WHERE " + strings.Join(conditions, " AND ")
+}
+
+// scanDrawerRows reads every row of an `id, type, hall, tool_name, content,
+// created_at` result set into Drawers. Shared by SearchDrawers and
+// GetTimeline, which select those same columns in that same order.
+func scanDrawerRows(rows *sql.Rows) ([]Drawer, error) {
+	var out []Drawer
+	for rows.Next() {
+		var d Drawer
+		var drawerType string
+		var toolName sql.NullString
+		var createdAt int64
+		if err := rows.Scan(&d.ID, &drawerType, &d.Hall, &toolName, &d.Content, &createdAt); err != nil {
+			return nil, fmt.Errorf("storage: scan drawer row: %w", err)
+		}
+		d.ToolName = toolName.String
+		d.CreatedAt = time.Unix(createdAt, 0)
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
 // RecentSummaries returns up to limit summary drawers for a wing, most
 // recent first.
 func (s *Store) RecentSummaries(wingID int64, limit int) ([]Drawer, error) {
@@ -176,16 +205,11 @@ func (s *Store) SearchDrawers(wingID int64, query, hall, drawerType string, limi
 		args = append(args, drawerType)
 	}
 
-	whereClause := ""
-	if len(conditions) > 0 {
-		whereClause = "WHERE " + strings.Join(conditions, " AND ")
-	}
-
 	querySQL := fmt.Sprintf(
 		`SELECT id, type, hall, tool_name, content, created_at FROM drawers
 		 %s
 		 ORDER BY created_at DESC, id DESC LIMIT ?`,
-		whereClause,
+		whereClause(conditions),
 	)
 	args = append(args, limit)
 
@@ -195,20 +219,7 @@ func (s *Store) SearchDrawers(wingID int64, query, hall, drawerType string, limi
 	}
 	defer rows.Close()
 
-	var out []Drawer
-	for rows.Next() {
-		var d Drawer
-		var drawerType string
-		var toolName sql.NullString
-		var createdAt int64
-		if err := rows.Scan(&d.ID, &drawerType, &d.Hall, &toolName, &d.Content, &createdAt); err != nil {
-			return nil, fmt.Errorf("storage: scan search row: %w", err)
-		}
-		d.ToolName = toolName.String
-		d.CreatedAt = time.Unix(createdAt, 0)
-		out = append(out, d)
-	}
-	return out, rows.Err()
+	return scanDrawerRows(rows)
 }
 
 // InsertManualSummary records a user or AI explicit summary drawer.
@@ -255,16 +266,11 @@ func (s *Store) GetTimeline(wingID int64, sessionID string, since time.Time, lim
 		args = append(args, since.Unix())
 	}
 
-	whereClause := ""
-	if len(conditions) > 0 {
-		whereClause = "WHERE " + strings.Join(conditions, " AND ")
-	}
-
 	querySQL := fmt.Sprintf(
 		`SELECT id, type, hall, tool_name, content, created_at FROM drawers
 		 %s
 		 ORDER BY created_at ASC, id ASC LIMIT ?`,
-		whereClause,
+		whereClause(conditions),
 	)
 	args = append(args, limit)
 
@@ -274,20 +280,7 @@ func (s *Store) GetTimeline(wingID int64, sessionID string, since time.Time, lim
 	}
 	defer rows.Close()
 
-	var out []Drawer
-	for rows.Next() {
-		var d Drawer
-		var drawerType string
-		var toolName sql.NullString
-		var createdAt int64
-		if err := rows.Scan(&d.ID, &drawerType, &d.Hall, &toolName, &d.Content, &createdAt); err != nil {
-			return nil, fmt.Errorf("storage: scan timeline row: %w", err)
-		}
-		d.ToolName = toolName.String
-		d.CreatedAt = time.Unix(createdAt, 0)
-		out = append(out, d)
-	}
-	return out, rows.Err()
+	return scanDrawerRows(rows)
 }
 
 // DeleteDrawer deletes a drawer by ID, returning true if deleted.
