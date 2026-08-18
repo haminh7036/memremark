@@ -12,21 +12,21 @@
 Tham khảo từ 2 repo này để xây dựng dự án: [Claude Mem](https://github.com/thedotmack/claude-mem), [Mempalace](https://github.com/mempalace/mempalace)
 
 ## Hiện trạng
-Hiện tại có tới tận 3 thiết bị sử dụng CLI (Claude Code, Antigravity CLI), chủ yếu là [Antigravity CLI](https://antigravity.google/product/antigravity-cli) là PC1 (trên công ty), PC2 (tại nhà), Laptop (tại nhà).
-Mỗi lần cần thảo luận hay gì thi phải nói lại toàn bộ lịch sử trò chuyện, cho nên là cực kỳ bất tiện.
+Hiện tại tôi sử dụng CLI (Claude Code, Antigravity CLI) trên 3 thiết bị: PC1 (trên công ty), PC2 (tại nhà) và Laptop (tại nhà).
+Mỗi lần chuyển đổi thiết bị hoặc mở phiên làm việc mới phải giải thích lại toàn bộ ngữ cảnh, quy ước và lịch sử trước đó, gây gián đoạn và bất tiện.
 
 ## Mục tiêu
-**Tự động** lưu trữ, trích xuất và duy trì liền mạch cuộc trò chuyện và kiến thức được đúc kết lại qua toàn bộ các thiết bị mà không bị ngắt quãng.
+**Tự động** lưu trữ, đúc kết và duy trì liền mạch ngữ cảnh dự án cùng tri thức qua toàn bộ các thiết bị mà không bị ngắt quãng.
 
 ## Tiến độ
 Chia làm 2 phần: **Core Engine & MCP Server** (trên 1 máy) làm trước, **Sync Layer** (đồng bộ đa thiết bị) làm sau.
-- **Core Engine & MCP Server đã hoàn thiện và kiểm thử đầy đủ** (hỗ trợ Hook injection và Model Context Protocol stdio server với 4 tools).
-- Sync Layer chưa bắt đầu.
+- **Core Engine, MCP Server & Web Dashboard đã hoàn thiện và kiểm thử đầy đủ** (hỗ trợ Hook injection, Model Context Protocol stdio server với 4 tools, và Web Dashboard dòng thời gian).
+- Sync Layer: Dự kiến ở Phase 2.
 
 ## Cài đặt nhanh (Khuyến nghị)
 
 Script `install.sh` sẽ tự động:
-1. Build 4 binary (`memremarkd`, `memremark-hook-claude-sessionstart`, `memremark-hook-antigravity-preinvocation`, `memremark-mcp`) và cài đặt vào `~/.local/bin/`
+1. Build 5 binary (`memremarkd`, `memremark-hook-claude-sessionstart`, `memremark-hook-antigravity-preinvocation`, `memremark-mcp`, `memremark-ui`) và cài đặt vào `~/.local/bin/`
 2. Cài đặt và bật `systemd user service` để daemon tự chạy nền
 3. **Smart patch** cấu hình hook và MCP server:
    - **Antigravity CLI**: Hook `PreInvocation` vào `~/.gemini/config/hooks.json` và MCP server `memremark` vào `~/.gemini/config/mcp_config.json`
@@ -119,7 +119,7 @@ memremark-ui --no-open
 | :--- | :--- | :--- |
 | **Database** | `~/.memremark/memremark.db` | Lưu trữ SQLite: danh sách wing, quan sát verbatim, tóm tắt và watermark |
 | **Config File** | `~/.memremark/config.json` | Cấu hình model tóm tắt (`claude_model`, `antigravity_model`, `antigravity_effort`) |
-| **Binaries** | `~/.local/bin/memremarkd`<br>`~/.local/bin/memremark-hook-antigravity-preinvocation`<br>`~/.local/bin/memremark-hook-claude-sessionstart`<br>`~/.local/bin/memremark-mcp` | File thực thi sau khi cài đặt |
+| **Binaries** | `~/.local/bin/memremark*` | Danh sách binary sau khi cài đặt (`memremarkd`, hooks, MCP server, `memremark-ui`) |
 | **Systemd** | `~/.config/systemd/user/memremarkd.service` | Quản lý tiến trình daemon tự khởi động |
 | **Hook Antigravity** | `~/.gemini/config/hooks.json` | Cấu hình hook `PreInvocation` |
 | **MCP Antigravity** | `~/.gemini/config/mcp_config.json` | Cấu hình MCP server cho Antigravity CLI |
@@ -132,7 +132,7 @@ memremark-ui --no-open
 
 Mặc định, `memremarkd` tự động sử dụng các model nhẹ & rẻ nhất để tối ưu chi phí và RAM (`haiku` cho Claude Code, `gemini-3.7-flash-low` với `--effort low` cho Antigravity CLI).
 
-Bạn có thể tùy chỉnh model qua file `~/.memremark/config.json`:
+Bạn có thể tùy chỉnh model và dashboard qua file `~/.memremark/config.json`:
 
 ```json
 {
@@ -140,6 +140,11 @@ Bạn có thể tùy chỉnh model qua file `~/.memremark/config.json`:
     "claude_model": "haiku",
     "antigravity_model": "gemini-3.7-flash-low",
     "antigravity_effort": "low"
+  },
+  "ui": {
+    "host": "127.0.0.1",
+    "port": 8765,
+    "auto_open": true
   }
 }
 ```
@@ -149,7 +154,9 @@ Bạn có thể tùy chỉnh model qua file `~/.memremark/config.json`:
   - `MEMREMARK_CLAUDE_MODEL`: Đổi model cho Claude (vd: `haiku`, `claude-3-5-sonnet`, `default`).
   - `MEMREMARK_ANTIGRAVITY_MODEL`: Đổi model cho Antigravity (vd: `gemini-3.7-flash-low`, `flash_lite`, `default`).
   - `MEMREMARK_ANTIGRAVITY_EFFORT`: Đổi mức reasoning effort (vd: `low`, `medium`, `high`, `default`).
-* **Lưu ý:** Đặt giá trị `"default"` hoặc `""` nếu muốn daemon không truyền cờ `--model`, để CLI tự dùng model mặc định của bạn.
+  - `MEMREMARK_UI_HOST`: Tùy chỉnh host cho UI (vd: `0.0.0.0`, `127.0.0.1`).
+  - `MEMREMARK_UI_PORT`: Tùy chỉnh cổng port cho UI (vd: `8765`, `9000`).
+* **Lưu ý:** Đặt giá trị `"default"` hoặc `""` cho model nếu muốn daemon không truyền cờ `--model`, để CLI tự dùng model mặc định của bạn.
 
 ---
 
@@ -159,10 +166,11 @@ Nếu không sử dụng `install.sh`, bạn có thể build và cấu hình th�
 
 ### 1. Build binary
 ```bash
-go build -o memremarkd ./cmd/memremarkd
-go build -o memremark-hook-claude-sessionstart ./cmd/memremark-hook-claude-sessionstart
-go build -o memremark-hook-antigravity-preinvocation ./cmd/memremark-hook-antigravity-preinvocation
-go build -o memremark-mcp ./cmd/memremark-mcp
+go build -o bin/memremarkd ./cmd/memremarkd
+go build -o bin/memremark-hook-claude-sessionstart ./cmd/memremark-hook-claude-sessionstart
+go build -o bin/memremark-hook-antigravity-preinvocation ./cmd/memremark-hook-antigravity-preinvocation
+go build -o bin/memremark-mcp ./cmd/memremark-mcp
+go build -o bin/memremark-ui ./cmd/memremark-ui
 ```
 
 ### 2. Cài hook cho Claude Code
