@@ -24,25 +24,40 @@ func (d *Daemon) pollAntigravity(now time.Time) error {
 	// Same tolerance pattern claudecode.DiscoverTranscriptFiles already uses
 	// for a missing ~/.claude/projects directory: "doesn't exist" means "no
 	// conversations, nothing to do", not an error to log every poll tick.
-	if _, err := os.Stat(d.antigravitySummariesDB); err != nil {
+	info, err := os.Stat(d.antigravitySummariesDB)
+	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
 		}
 		return err
 	}
 
-	convs, err := antigravity.ListConversations(d.antigravitySummariesDB)
-	if err != nil {
-		return err
+	convs := d.antigravityConvs
+	if d.antigravityConvs == nil || !info.ModTime().Equal(d.antigravitySummariesModTime) || info.Size() != d.antigravitySummariesSize {
+		freshConvs, err := antigravity.ListConversations(d.antigravitySummariesDB)
+		if err != nil {
+			return err
+		}
+		d.antigravityConvs = freshConvs
+		d.antigravitySummariesModTime = info.ModTime()
+		d.antigravitySummariesSize = info.Size()
+		convs = freshConvs
 	}
+
 	for _, conv := range convs {
 		if conv.WorkspaceURIs == "" {
 			continue
 		}
 		dbPath := filepath.Join(filepath.Dir(d.antigravitySummariesDB), "conversations", conv.ID+".db")
-		if _, err := os.Stat(dbPath); err != nil {
+		dbInfo, err := os.Stat(dbPath)
+		if err != nil {
 			continue
 		}
+		meta, seen := d.antigravityDBMeta[conv.ID]
+		if seen && !meta.modTime.IsZero() && dbInfo.ModTime().Equal(meta.modTime) && dbInfo.Size() == meta.size {
+			continue
+		}
+
 		sinceIdx, ok := d.antigravityLastIdx[conv.ID]
 		if !ok {
 			// First time this process has seen this conversation: fall back
@@ -64,6 +79,10 @@ func (d *Daemon) pollAntigravity(now time.Time) error {
 			log.Printf("daemon: read antigravity conversation %s: %v", conv.ID, err)
 			continue
 		}
+		d.antigravityDBMeta[conv.ID] = dbMeta{
+			modTime: dbInfo.ModTime(),
+			size:    dbInfo.Size(),
+		}
 		d.antigravityLastIdx[conv.ID] = maxIdx
 		for _, o := range obs {
 			if err := d.recordObservation(o, d.antigravityInvoker, now); err != nil {
@@ -75,8 +94,10 @@ func (d *Daemon) pollAntigravity(now time.Time) error {
 		// ordering (persist after the write, not before). Otherwise a crash
 		// between the persist and the writes would make a restart resume
 		// past rows that were never durably recorded, silently losing them.
-		if err := d.Store.SetPollState(antigravityConvKey(conv.ID), maxIdx); err != nil {
-			log.Printf("daemon: persist watermark for conversation %s: %v", conv.ID, err)
+		if maxIdx > sinceIdx {
+			if err := d.Store.SetPollState(antigravityConvKey(conv.ID), maxIdx); err != nil {
+				log.Printf("daemon: persist watermark for conversation %s: %v", conv.ID, err)
+			}
 		}
 	}
 	return nil

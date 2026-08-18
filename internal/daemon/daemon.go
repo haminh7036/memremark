@@ -5,6 +5,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/haminh7036/memremark/internal/adapter/antigravity"
 	"github.com/haminh7036/memremark/internal/adapter/claudecode"
 	"github.com/haminh7036/memremark/internal/debounce"
 	"github.com/haminh7036/memremark/internal/storage"
@@ -17,6 +18,11 @@ import (
 // once this is running day to day.
 const idleWindow = 5 * time.Second
 
+type dbMeta struct {
+	modTime time.Time
+	size    int64
+}
+
 // Daemon ties transcript reading, storage, debounce, and summarization
 // together into one repeatable poll cycle.
 type Daemon struct {
@@ -27,8 +33,12 @@ type Daemon struct {
 	claudeTailer       *claudecode.Tailer
 	claudeParsers      map[string]*claudecode.Parser
 
-	antigravitySummariesDB string
-	antigravityLastIdx     map[string]int64
+	antigravitySummariesDB      string
+	antigravitySummariesModTime time.Time
+	antigravitySummariesSize    int64
+	antigravityConvs            []antigravity.ConversationInfo
+	antigravityDBMeta           map[string]dbMeta
+	antigravityLastIdx          map[string]int64
 
 	sessionWing    map[string]int64
 	sessionInvoker map[string]summarizer.Invoker
@@ -48,6 +58,7 @@ func New(store *storage.Store, claudeProjectsRoot, antigravitySummariesDB string
 		claudeTailer:           claudecode.NewTailer(),
 		claudeParsers:          make(map[string]*claudecode.Parser),
 		antigravitySummariesDB: antigravitySummariesDB,
+		antigravityDBMeta:      make(map[string]dbMeta),
 		antigravityLastIdx:     make(map[string]int64),
 		sessionWing:            make(map[string]int64),
 		sessionInvoker:         make(map[string]summarizer.Invoker),

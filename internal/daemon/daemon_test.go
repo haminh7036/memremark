@@ -586,3 +586,134 @@ func TestPollAntigravitySkipsWhenSummariesDBMissing(t *testing.T) {
 		t.Fatalf("expected no log output when summaries db is missing, got %q", logBuf.String())
 	}
 }
+
+// TestDaemon_SkipsRedundantPollStateWrites verifies that polling unchanged
+// Claude Code transcripts and Antigravity conversation databases does not
+// trigger redundant SetPollState database writes.
+func TestDaemon_SkipsRedundantPollStateWrites(t *testing.T) {
+	dir := t.TempDir()
+	projectsRoot := filepath.Join(dir, "claude-projects")
+	writeSampleTranscript(t, projectsRoot)
+
+	store, err := storage.Open(filepath.Join(dir, "memremark.db"))
+	if err != nil {
+		t.Fatalf("storage.Open: %v", err)
+	}
+	defer store.Close()
+
+	antigravityDir := filepath.Join(dir, "antigravity")
+	if err := os.MkdirAll(filepath.Join(antigravityDir, "conversations"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	summariesDB := filepath.Join(antigravityDir, "conversation_summaries.db")
+	createSummariesDBWithConversation(t, summariesDB, "conv-skip", "/tmp/agy-skip", "2026-08-11 10:00:00.000000000+00:00")
+
+	conversationDB := filepath.Join(antigravityDir, "conversations", "conv-skip.db")
+	mustExecSQLite(t, conversationDB, `CREATE TABLE steps (idx integer, step_payload blob)`)
+	mustExecSQLite(t, conversationDB, `INSERT INTO steps (idx, step_payload) VALUES (0, ?)`,
+		buildProtobufPromptBlob("agy step zero"))
+
+	claudeFile := filepath.Join(projectsRoot, "-tmp-project", "sess-1.jsonl")
+
+	d := New(store, projectsRoot, summariesDB, stubInvoker{reply: "[]"}, stubInvoker{reply: "[]"})
+
+	// Pass 1: initial scan processes both transcripts and persists watermarks
+	base := time.Now()
+	if err := d.PollOnce(context.Background(), base); err != nil {
+		t.Fatalf("first PollOnce: %v", err)
+	}
+
+	claudeKey := claudeFileKey(claudeFile)
+	claudeOffset1, ok, err := store.GetPollState(claudeKey)
+	if err != nil || !ok || claudeOffset1 == 0 {
+		t.Fatalf("expected claude poll state > 0, got %d (ok=%v, err=%v)", claudeOffset1, ok, err)
+	}
+
+	agyKey := antigravityConvKey("conv-skip")
+	agyIdx1, ok, err := store.GetPollState(agyKey)
+	if err != nil || !ok || agyIdx1 != 0 {
+		t.Fatalf("expected agy poll state 0, got %d (ok=%v, err=%v)", agyIdx1, ok, err)
+	}
+
+	// Set sentinel values in poll_state. If the next poll tick skips redundant writes,
+	// these sentinel values will not be overwritten.
+	const sentinel int64 = 99999
+	if err := store.SetPollState(claudeKey, sentinel); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetPollState(agyKey, sentinel); err != nil {
+		t.Fatal(err)
+	}
+
+	// Pass 2: files are unchanged, polling must skip redundant SetPollState writes
+	if err := d.PollOnce(context.Background(), base.Add(time.Second)); err != nil {
+		t.Fatalf("second PollOnce: %v", err)
+	}
+
+	if val, _, _ := store.GetPollState(claudeKey); val != sentinel {
+		t.Fatalf("expected claude poll_state to remain sentinel %d, got %d (redundant write occurred)", sentinel, val)
+	}
+	if val, _, _ := store.GetPollState(agyKey); val != sentinel {
+		t.Fatalf("expected agy poll_state to remain sentinel %d, got %d (redundant write occurred)", sentinel, val)
+	}
+
+	// Restore correct poll state values
+	if err := store.SetPollState(claudeKey, claudeOffset1); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetPollState(agyKey, agyIdx1); err != nil {
+		t.Fatal(err)
+	}
+
+	// Append new data to both sources
+	f, err := os.OpenFile(claudeFile, os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newLine := `{"type":"assistant","sessionId":"sess-1","cwd":"/tmp/project","message":{"content":[{"type":"tool_use","id":"t2","name":"Bash","input":{"command":"pwd"}}]}}` + "\n"
+	if _, err := f.WriteString(newLine); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	touchTime := base.Add(2 * time.Second)
+	_ = os.Chtimes(claudeFile, touchTime, touchTime)
+
+	mustExecSQLite(t, conversationDB, `INSERT INTO steps (idx, step_payload) VALUES (1, ?)`,
+		buildProtobufPromptBlob("agy step one"))
+	_ = os.Chtimes(conversationDB, touchTime, touchTime)
+
+	// Pass 3: modified files should be read and poll_state updated
+	if err := d.PollOnce(context.Background(), base.Add(3*time.Second)); err != nil {
+		t.Fatalf("third PollOnce: %v", err)
+	}
+
+	claudeOffset2, _, _ := store.GetPollState(claudeKey)
+	if claudeOffset2 <= claudeOffset1 {
+		t.Fatalf("expected claude poll state to advance past %d, got %d", claudeOffset1, claudeOffset2)
+	}
+	agyIdx2, _, _ := store.GetPollState(agyKey)
+	if agyIdx2 != 1 {
+		t.Fatalf("expected agy poll state 1, got %d", agyIdx2)
+	}
+
+	// Pass 4: unchanged again -> sentinel check
+	const sentinel2 int64 = 88888
+	if err := store.SetPollState(claudeKey, sentinel2); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetPollState(agyKey, sentinel2); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := d.PollOnce(context.Background(), base.Add(4*time.Second)); err != nil {
+		t.Fatalf("fourth PollOnce: %v", err)
+	}
+
+	if val, _, _ := store.GetPollState(claudeKey); val != sentinel2 {
+		t.Fatalf("expected claude poll_state to remain sentinel2 %d, got %d", sentinel2, val)
+	}
+	if val, _, _ := store.GetPollState(agyKey); val != sentinel2 {
+		t.Fatalf("expected agy poll_state to remain sentinel2 %d, got %d", sentinel2, val)
+	}
+}
+
