@@ -297,3 +297,90 @@ func (s *Store) DeleteDrawer(id int64) (bool, error) {
 	return rowsAffected > 0, nil
 }
 
+// WingStats contains a wing's metadata and drawer counts.
+type WingStats struct {
+	ID            int64     `json:"id"`
+	Path          string    `json:"path"`
+	Name          string    `json:"name"`
+	CreatedAt     time.Time `json:"created_at"`
+	SummaryCount  int       `json:"summary_count"`
+	VerbatimCount int       `json:"verbatim_count"`
+}
+
+// GlobalStats contains overall repository statistics.
+type GlobalStats struct {
+	TotalWings     int            `json:"total_wings"`
+	TotalSummaries int            `json:"total_summaries"`
+	TotalVerbatim  int            `json:"total_verbatim"`
+	HallCounts     map[string]int `json:"halls"`
+}
+
+// ListWingsWithStats returns every wing along with summary and verbatim counts, ordered by wing name ASC.
+func (s *Store) ListWingsWithStats() ([]WingStats, error) {
+	rows, err := s.db.Query(`
+		SELECT 
+			w.id, w.path, w.name, w.created_at,
+			COALESCE(SUM(CASE WHEN d.type = 'summary' THEN 1 ELSE 0 END), 0) AS summary_count,
+			COALESCE(SUM(CASE WHEN d.type = 'verbatim' THEN 1 ELSE 0 END), 0) AS verbatim_count
+		FROM wings w
+		LEFT JOIN drawers d ON w.id = d.wing_id
+		GROUP BY w.id, w.path, w.name, w.created_at
+		ORDER BY w.name ASC, w.id ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("storage: list wings with stats: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]WingStats, 0)
+	for rows.Next() {
+		var ws WingStats
+		var createdAt int64
+		if err := rows.Scan(&ws.ID, &ws.Path, &ws.Name, &createdAt, &ws.SummaryCount, &ws.VerbatimCount); err != nil {
+			return nil, fmt.Errorf("storage: scan wing stats: %w", err)
+		}
+		ws.CreatedAt = time.Unix(createdAt, 0)
+		out = append(out, ws)
+	}
+	return out, rows.Err()
+}
+
+// GetGlobalStats calculates total wing, summary, verbatim, and per-hall counts.
+func (s *Store) GetGlobalStats() (GlobalStats, error) {
+	stats := GlobalStats{
+		HallCounts: map[string]int{
+			HallFact:       0,
+			HallDiscovery:  0,
+			HallPreference: 0,
+			HallAdvice:     0,
+		},
+	}
+
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM wings`).Scan(&stats.TotalWings); err != nil {
+		return stats, fmt.Errorf("storage: count wings: %w", err)
+	}
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM drawers WHERE type = 'summary'`).Scan(&stats.TotalSummaries); err != nil {
+		return stats, fmt.Errorf("storage: count summaries: %w", err)
+	}
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM drawers WHERE type = 'verbatim'`).Scan(&stats.TotalVerbatim); err != nil {
+		return stats, fmt.Errorf("storage: count verbatim: %w", err)
+	}
+
+	rows, err := s.db.Query(`SELECT hall, COUNT(*) FROM drawers WHERE type = 'summary' GROUP BY hall`)
+	if err != nil {
+		return stats, fmt.Errorf("storage: count halls: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var hall string
+		var count int
+		if err := rows.Scan(&hall, &count); err != nil {
+			return stats, fmt.Errorf("storage: scan hall count: %w", err)
+		}
+		stats.HallCounts[hall] = count
+	}
+	return stats, rows.Err()
+}
+
+

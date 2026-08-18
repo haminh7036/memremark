@@ -411,3 +411,142 @@ func TestStore_GetOrCreateWing_Concurrency(t *testing.T) {
 	}
 }
 
+func TestStore_ListWingsWithStats(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "memremark.db")
+	store, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+
+	// 1. Empty database test
+	emptyWings, err := store.ListWingsWithStats()
+	if err != nil {
+		t.Fatalf("ListWingsWithStats on empty db failed: %v", err)
+	}
+	if len(emptyWings) != 0 {
+		t.Fatalf("expected 0 wings on empty db, got %d", len(emptyWings))
+	}
+
+	// 2. Populated wings test with sorting and mixed counts
+	wB, err := store.GetOrCreateWing("/path/to/b-project")
+	if err != nil {
+		t.Fatalf("create wing B: %v", err)
+	}
+	wA, err := store.GetOrCreateWing("/path/to/a-project")
+	if err != nil {
+		t.Fatalf("create wing A: %v", err)
+	}
+	wC, err := store.GetOrCreateWing("/path/to/c-empty-project")
+	if err != nil {
+		t.Fatalf("create wing C: %v", err)
+	}
+
+	now := time.Now().Truncate(time.Second)
+	// Wing A: 2 summaries, 1 verbatim
+	_ = store.InsertSummaryDrawer(wA, "s1", HallFact, "Fact A1", now, now, now)
+	_ = store.InsertSummaryDrawer(wA, "s1", HallDiscovery, "Discovery A1", now, now, now)
+	_ = store.InsertVerbatimDrawer(wA, "s1", "Read", "cat foo.go", now)
+
+	// Wing B: 1 summary, 2 verbatims
+	_ = store.InsertSummaryDrawer(wB, "s2", HallAdvice, "Advice B1", now, now, now)
+	_ = store.InsertVerbatimDrawer(wB, "s2", "Bash", "go build", now)
+	_ = store.InsertVerbatimDrawer(wB, "s2", "Edit", "edit bar.go", now)
+
+	// Wing C: 0 drawers
+
+	wings, err := store.ListWingsWithStats()
+	if err != nil {
+		t.Fatalf("ListWingsWithStats failed: %v", err)
+	}
+	if len(wings) != 3 {
+		t.Fatalf("expected 3 wings, got %d", len(wings))
+	}
+
+	// Verify sorting by name ASC: a-project, b-project, c-empty-project
+	if wings[0].Name != "a-project" || wings[1].Name != "b-project" || wings[2].Name != "c-empty-project" {
+		t.Fatalf("unexpected wing sort order: %s, %s, %s", wings[0].Name, wings[1].Name, wings[2].Name)
+	}
+
+	// Verify wing A stats
+	if wings[0].ID != wA || wings[0].Path != "/path/to/a-project" || wings[0].SummaryCount != 2 || wings[0].VerbatimCount != 1 {
+		t.Fatalf("unexpected wing A stats: %+v", wings[0])
+	}
+	if wings[0].CreatedAt.IsZero() {
+		t.Fatalf("expected non-zero CreatedAt for wing A")
+	}
+
+	// Verify wing B stats
+	if wings[1].ID != wB || wings[1].Path != "/path/to/b-project" || wings[1].SummaryCount != 1 || wings[1].VerbatimCount != 2 {
+		t.Fatalf("unexpected wing B stats: %+v", wings[1])
+	}
+
+	// Verify wing C stats (empty drawers)
+	if wings[2].ID != wC || wings[2].Path != "/path/to/c-empty-project" || wings[2].SummaryCount != 0 || wings[2].VerbatimCount != 0 {
+		t.Fatalf("unexpected wing C stats: %+v", wings[2])
+	}
+}
+
+func TestStore_GetGlobalStats(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "memremark.db")
+	store, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+
+	// 1. Empty database test
+	emptyStats, err := store.GetGlobalStats()
+	if err != nil {
+		t.Fatalf("GetGlobalStats on empty db failed: %v", err)
+	}
+	if emptyStats.TotalWings != 0 || emptyStats.TotalSummaries != 0 || emptyStats.TotalVerbatim != 0 {
+		t.Fatalf("expected 0 for all totals on empty db, got %+v", emptyStats)
+	}
+	if emptyStats.HallCounts[HallFact] != 0 || emptyStats.HallCounts[HallDiscovery] != 0 ||
+		emptyStats.HallCounts[HallPreference] != 0 || emptyStats.HallCounts[HallAdvice] != 0 {
+		t.Fatalf("expected all hall counts to be 0 on empty db, got %+v", emptyStats.HallCounts)
+	}
+
+	// 2. Populated database test
+	w1, _ := store.GetOrCreateWing("/path/to/proj1")
+	w2, _ := store.GetOrCreateWing("/path/to/proj2")
+	now := time.Now().Truncate(time.Second)
+
+	_ = store.InsertSummaryDrawer(w1, "s1", HallFact, "Fact 1", now, now, now)
+	_ = store.InsertSummaryDrawer(w1, "s1", HallDiscovery, "Discovery 1", now, now, now)
+	_ = store.InsertVerbatimDrawer(w1, "s1", "Read", "cat file", now)
+
+	_ = store.InsertSummaryDrawer(w2, "s2", HallAdvice, "Advice 1", now, now, now)
+	_ = store.InsertVerbatimDrawer(w2, "s2", "Bash", "make test", now)
+
+	stats, err := store.GetGlobalStats()
+	if err != nil {
+		t.Fatalf("GetGlobalStats failed: %v", err)
+	}
+
+	if stats.TotalWings != 2 {
+		t.Fatalf("expected 2 wings, got %d", stats.TotalWings)
+	}
+	if stats.TotalSummaries != 3 {
+		t.Fatalf("expected 3 summaries, got %d", stats.TotalSummaries)
+	}
+	if stats.TotalVerbatim != 2 {
+		t.Fatalf("expected 2 verbatim, got %d", stats.TotalVerbatim)
+	}
+
+	if stats.HallCounts[HallFact] != 1 {
+		t.Fatalf("expected 1 fact, got %d", stats.HallCounts[HallFact])
+	}
+	if stats.HallCounts[HallDiscovery] != 1 {
+		t.Fatalf("expected 1 discovery, got %d", stats.HallCounts[HallDiscovery])
+	}
+	if stats.HallCounts[HallAdvice] != 1 {
+		t.Fatalf("expected 1 advice, got %d", stats.HallCounts[HallAdvice])
+	}
+	if stats.HallCounts[HallPreference] != 0 {
+		t.Fatalf("expected 0 preference, got %d", stats.HallCounts[HallPreference])
+	}
+}
+
+
