@@ -64,14 +64,14 @@ Các lệnh quản lý daemon:
 
 1. **`search_memory`**: Tìm kiếm ký ức theo từ khóa, danh mục hall, loại drawer hoặc workspace.
    - `query` *(string)*: Từ khóa tìm kiếm trong nội dung.
-   - `hall` *(string, optional)*: Lọc theo danh mục (`discovery`, `decision`, `fact`, `advice`, `preference`, `warning`, `insight`).
+   - `hall` *(string, optional)*: Lọc theo danh mục (`fact`, `discovery`, `preference`, `advice`, `event`).
    - `type` *(string, optional)*: Lọc theo loại drawer (`summary`, `verbatim`, hoặc `all`).
    - `wing_path` *(string, optional)*: Đường dẫn thư mục workspace (mặc định: thư mục hiện tại).
    - `limit` *(integer, optional)*: Số lượng kết quả tối đa (mặc định: 10, tối đa: 50).
 
 2. **`remember`**: Ghi nhớ tường minh một bài học, quy ước, quyết định hoặc phát hiện mới vào database.
    - `content` *(string, required)*: Nội dung cần ghi nhớ.
-   - `hall` *(string, required)*: Phân loại ký ức (`discovery`, `decision`, `fact`, `advice`, `preference`, `warning`, `insight`).
+   - `hall` *(string, required)*: Phân loại ký ức (`fact`, `discovery`, `preference`, `advice`).
    - `wing_path` *(string, optional)*: Đường dẫn thư mục workspace (mặc định: thư mục hiện tại).
 
 3. **`get_timeline`**: Xem dòng thời gian chi tiết các sự kiện/tóm tắt diễn ra theo thứ tự thời gian.
