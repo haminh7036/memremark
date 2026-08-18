@@ -13,19 +13,23 @@ Seamless cross-session working memory and context continuity engine for AI codin
 ## Inspiration
 Built with inspiration from [Claude Mem](https://github.com/thedotmack/claude-mem) and [Mempalace](https://github.com/mempalace/mempalace).
 
-## Motivation
-When working across multiple machines (e.g. Work PC, Home PC, Laptop) and restarting AI coding sessions, context is often lost, requiring developers to repeatedly re-explain project background, conventions, and architectural decisions.
+## Architecture & Working Principles
 
-MemRemark solves this by **automatically** recording, distilling, and maintaining continuous project knowledge across sessions.
+MemRemark operates as an **Active Memory Palace**:
+1. **Passive Observation**: Asynchronously tails CLI transcripts and tool interactions from Claude Code and Antigravity CLI without introducing runtime overhead.
+2. **Semantic Distillation**: A lightweight background daemon leverages low-cost models (`haiku`, `gemini-3.7-flash-low`) to distill session logs into structured SQLite drawers (`fact`, `discovery`, `preference`, `advice`).
+3. **Zero-Latency Context Injection**: Automatically injects relevant workspace knowledge into new sessions via CLI hooks (`SessionStart`, `PreInvocation`).
+4. **Active Knowledge Retrieval**: Empowers AI agents to explicitly search, record, and prune project memories on demand via Model Context Protocol (MCP) tools.
+5. **Timeline Dashboard**: A standalone local web viewer (`memremark-ui`) with a Vue 3.5 + Tailwind v4 interactive timeline.
 
 ---
 
 ## Project Status & Roadmap
-- **Phase 1: Core Engine & MCP Server (Single Machine)** — **Complete & Fully Tested**
+- **Phase 1: Core Engine, MCP Server & Web Dashboard (Single Host)** — **100% Complete & Fully Tested**
   - Transcript tailing & SQLite state capture for Claude Code and Antigravity CLI.
   - Headless background summarizer daemon with bidirectional auto-fallback.
   - Seamless context injection hooks (`SessionStart` and `PreInvocation`).
-  - Model Context Protocol (MCP) server with 4 tools.
+  - Model Context Protocol (MCP) server with 4 tools (`search_memory`, `remember`, `get_timeline`, `forget_memory`).
   - Interactive Web Dashboard (`memremark-ui`) with Vue 3.5 + Tailwind v4 timeline.
 - **Phase 2: Sync Layer (Multi-Device Sync)** — *Planned*.
 

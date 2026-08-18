@@ -11,17 +11,23 @@
 ## Ý tưởng
 Tham khảo từ 2 repo này để xây dựng dự án: [Claude Mem](https://github.com/thedotmack/claude-mem), [Mempalace](https://github.com/mempalace/mempalace)
 
-## Hiện trạng
-Hiện tại tôi sử dụng CLI (Claude Code, Antigravity CLI) trên 3 thiết bị: PC1 (trên công ty), PC2 (tại nhà) và Laptop (tại nhà).
-Mỗi lần chuyển đổi thiết bị hoặc mở phiên làm việc mới phải giải thích lại toàn bộ ngữ cảnh, quy ước và lịch sử trước đó, gây gián đoạn và bất tiện.
+## Kiến trúc & Nguyên lý hoạt động (Architecture)
 
-## Mục tiêu
-**Tự động** lưu trữ, đúc kết và duy trì liền mạch ngữ cảnh dự án cùng tri thức qua toàn bộ các thiết bị mà không bị ngắt quãng.
+MemRemark hoạt động theo mô hình **Active Memory Palace**:
+1. **Thu thập thụ động (Passive Observation)**: Daemon chạy nền tự động quét transcript và tool call từ Claude Code và Antigravity CLI mà không làm chậm phiên làm việc.
+2. **Đúc kết ngữ nghĩa (Semantic Distillation)**: Sử dụng các model tối ưu chi phí (`haiku`, `gemini-3.7-flash-low`) để cô đọng lịch sử thành các mục tri thức có cấu trúc (`fact`, `discovery`, `preference`, `advice`).
+3. **Nạp ngữ cảnh tức thì (Context Injection)**: Tự động nạp các tri thức đúc kết gần nhất vào đầu phiên làm việc mới thông qua CLI Hooks (`SessionStart`, `PreInvocation`).
+4. **Truy vấn chủ động (Active MCP Retrieval)**: Cung cấp giao thức Model Context Protocol (MCP) để AI Agent chủ động tìm kiếm và ghi nhớ tri thức trong quá trình xử lý tác vụ.
+5. **Trực quan hóa (Timeline Dashboard)**: Cung cấp Web UI độc lập (`memremark-ui`) xem dòng thời gian tri thức theo từng workspace.
 
-## Tiến độ
-Chia làm 2 phần: **Core Engine & MCP Server** (trên 1 máy) làm trước, **Sync Layer** (đồng bộ đa thiết bị) làm sau.
-- **Core Engine, MCP Server & Web Dashboard đã hoàn thiện và kiểm thử đầy đủ** (hỗ trợ Hook injection, Model Context Protocol stdio server với 4 tools, và Web Dashboard dòng thời gian).
-- Sync Layer: Dự kiến ở Phase 2.
+## Trạng thái dự án & Lộ trình
+- **Phase 1: Core Engine, MCP Server & Web Dashboard (Single Host)** — **Hoàn thành 100% & Kiểm thử toàn diện**
+  - Tự động trích xuất transcript từ Claude Code và Antigravity CLI.
+  - Daemon tóm tắt chạy nền với cơ chế tự động Fallback 2 chiều.
+  - CLI Hooks nạp ngữ cảnh tự động cho Claude Code và Antigravity CLI.
+  - MCP stdio server với 4 tools (`search_memory`, `remember`, `get_timeline`, `forget_memory`).
+  - Web Dashboard dòng thời gian Vue 3.5 + Tailwind v4 nhúng trực tiếp trong Go binary (`memremark-ui`).
+- **Phase 2: Sync Layer (Đồng bộ đa thiết bị)** — *Kế hoạch tiếp theo*.
 
 ## Cài đặt nhanh (Khuyến nghị)
 
