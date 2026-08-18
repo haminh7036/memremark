@@ -99,3 +99,34 @@ func TestLoad_MalformedJSONReturnsError(t *testing.T) {
 		t.Fatal("expected error on malformed JSON, got nil")
 	}
 }
+
+func TestLoad_PartialJSONPreservesOtherDefaults(t *testing.T) {
+	tmpDir := t.TempDir()
+	memDir := filepath.Join(tmpDir, ".memremark")
+	if err := os.MkdirAll(memDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	jsonContent := `{
+		"summarizer": {
+			"claude_model": "custom-claude-only"
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(memDir, "config.json"), []byte(jsonContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+	if cfg.Summarizer.ClaudeModel != "custom-claude-only" {
+		t.Errorf("expected custom claude_model, got %q", cfg.Summarizer.ClaudeModel)
+	}
+	// Other fields must retain their default values
+	if cfg.Summarizer.AntigravityModel != DefaultAntigravityModel {
+		t.Errorf("expected default antigravity_model %q, got %q", DefaultAntigravityModel, cfg.Summarizer.AntigravityModel)
+	}
+	if cfg.Summarizer.AntigravityEffort != DefaultAntigravityEffort {
+		t.Errorf("expected default antigravity_effort %q, got %q", DefaultAntigravityEffort, cfg.Summarizer.AntigravityEffort)
+	}
+}

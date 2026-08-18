@@ -1,10 +1,9 @@
 package antigravity
 
 import (
+	"encoding/binary"
 	"unicode"
 	"unicode/utf8"
-
-	"google.golang.org/protobuf/encoding/protowire"
 )
 
 // minStringLen is the shortest byte run treated as a meaningful embedded
@@ -26,6 +25,14 @@ const minStringLen = 3
 // ponytail: hard recursion cap, per-message limits if per-field nesting
 // ever matters in real data.
 const maxRecursionDepth = 100
+
+// Protobuf wire types.
+const (
+	wireVarint  = 0
+	wireFixed64 = 1
+	wireBytes   = 2
+	wireFixed32 = 5
+)
 
 // ExtractStrings recovers every meaningful UTF-8 string embedded in a
 // protobuf-encoded blob, by walking the wire format generically (without
@@ -52,37 +59,37 @@ func extractStringsDepth(data []byte, depth int) []string {
 	}
 
 	for len(data) > 0 {
-		_, typ, n := protowire.ConsumeTag(data)
-		if n < 0 {
+		tag, n := binary.Uvarint(data)
+		if n <= 0 {
 			return out
 		}
 		data = data[n:]
 
-		switch typ {
-		case protowire.VarintType:
-			_, n := protowire.ConsumeVarint(data)
-			if n < 0 {
+		wireType := int(tag & 7)
+		switch wireType {
+		case wireVarint:
+			_, n := binary.Uvarint(data)
+			if n <= 0 {
 				return out
 			}
 			data = data[n:]
-		case protowire.Fixed32Type:
-			_, n := protowire.ConsumeFixed32(data)
-			if n < 0 {
+		case wireFixed32:
+			if len(data) < 4 {
 				return out
 			}
-			data = data[n:]
-		case protowire.Fixed64Type:
-			_, n := protowire.ConsumeFixed64(data)
-			if n < 0 {
+			data = data[4:]
+		case wireFixed64:
+			if len(data) < 8 {
 				return out
 			}
-			data = data[n:]
-		case protowire.BytesType:
-			v, n := protowire.ConsumeBytes(data)
-			if n < 0 {
+			data = data[8:]
+		case wireBytes:
+			length, n := binary.Uvarint(data)
+			if n <= 0 || uint64(len(data)-n) < length {
 				return out
 			}
-			data = data[n:]
+			v := data[n : n+int(length)]
+			data = data[n+int(length):]
 			if isMeaningfulText(v) {
 				out = append(out, string(v))
 			} else {

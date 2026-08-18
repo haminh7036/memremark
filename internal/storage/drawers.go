@@ -15,7 +15,8 @@ const (
 	HallAdvice     = "advice"
 )
 
-func isValidHall(hall string) bool {
+// IsValidHall reports whether hall is a valid summary classification.
+func IsValidHall(hall string) bool {
 	switch hall {
 	case HallFact, HallDiscovery, HallPreference, HallAdvice:
 		return true
@@ -39,7 +40,7 @@ func (s *Store) InsertVerbatimDrawer(wingID int64, sessionID, toolName, content 
 
 // InsertSummaryDrawer records one distilled summary for a wing.
 func (s *Store) InsertSummaryDrawer(wingID int64, sessionID, hall, content string, coversFrom, coversTo, createdAt time.Time) error {
-	if !isValidHall(hall) {
+	if !IsValidHall(hall) {
 		return fmt.Errorf("storage: invalid hall %q", hall)
 	}
 	_, err := s.db.Exec(
@@ -224,7 +225,7 @@ func (s *Store) SearchDrawers(wingID int64, query, hall, drawerType string, limi
 
 // InsertManualSummary records a user or AI explicit summary drawer.
 func (s *Store) InsertManualSummary(wingID int64, hall, content string, createdAt time.Time) (int64, error) {
-	if !isValidHall(hall) {
+	if !IsValidHall(hall) {
 		return 0, fmt.Errorf("storage: invalid hall %q", hall)
 	}
 	if createdAt.IsZero() {

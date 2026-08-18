@@ -12,8 +12,9 @@ import (
 	"testing"
 	"time"
 
+	"encoding/binary"
+
 	_ "modernc.org/sqlite"
-	"google.golang.org/protobuf/encoding/protowire"
 
 	"github.com/haminh7036/memremark/internal/storage"
 )
@@ -86,9 +87,9 @@ func mustExecSQLite(t *testing.T, path, query string, args ...any) {
 // text from (see internal/adapter/antigravity/reader_test.go).
 func buildProtobufPromptBlob(text string) []byte {
 	var buf []byte
-	buf = protowire.AppendTag(buf, 1, protowire.BytesType)
-	buf = protowire.AppendString(buf, text)
-	return buf
+	buf = binary.AppendUvarint(buf, (1<<3)|2)
+	buf = binary.AppendUvarint(buf, uint64(len(text)))
+	return append(buf, text...)
 }
 
 // createSummariesDBWithConversation builds a conversation_summaries.db with

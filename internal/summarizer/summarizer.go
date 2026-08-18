@@ -251,20 +251,11 @@ func parseSummaryItems(modelText string) ([]SummaryItem, error) {
 
 func validateHallValues(items []SummaryItem) error {
 	for _, it := range items {
-		if !isValidHallForSummarizer(it.Hall) {
+		if !storage.IsValidHall(it.Hall) {
 			return fmt.Errorf("summarizer: model returned invalid hall %q", it.Hall)
 		}
 	}
 	return nil
-}
-
-func isValidHallForSummarizer(hall string) bool {
-	switch hall {
-	case storage.HallFact, storage.HallDiscovery, storage.HallPreference, storage.HallAdvice:
-		return true
-	default:
-		return false
-	}
 }
 
 func truncate(s string, n int) string {

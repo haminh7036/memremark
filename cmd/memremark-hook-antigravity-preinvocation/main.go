@@ -28,9 +28,6 @@ func main() {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "memremark-hook-antigravity-preinvocation:", err)
 	}
-	if summaries == nil {
-		summaries = []storage.Drawer{}
-	}
 	if err := json.NewEncoder(os.Stdout).Encode(buildOutput(summaries)); err != nil {
 		fmt.Fprintln(os.Stderr, "memremark-hook-antigravity-preinvocation: failed to encode output:", err)
 	}

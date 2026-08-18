@@ -8,7 +8,6 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite"
-	"google.golang.org/protobuf/encoding/protowire"
 )
 
 func createTestConversationDB(t *testing.T, path string, payloads [][]byte) {
@@ -90,8 +89,8 @@ func createTestSummariesDBDatetimeColumn(t *testing.T, path, conversationID, wor
 
 func buildProtobufPromptBlob(text string) []byte {
 	var buf []byte
-	buf = protowire.AppendTag(buf, 1, protowire.BytesType)
-	buf = protowire.AppendString(buf, text)
+	buf = appendTag(buf, 1, wireBytes)
+	buf = appendString(buf, text)
 	return buf
 }
 

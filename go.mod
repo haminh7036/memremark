@@ -2,10 +2,7 @@ module github.com/haminh7036/memremark
 
 go 1.26.5
 
-require (
-	google.golang.org/protobuf v1.36.12
-	modernc.org/sqlite v1.56.0
-)
+require modernc.org/sqlite v1.56.0
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect

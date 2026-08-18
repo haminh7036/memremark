@@ -53,20 +53,8 @@ func LoadFromFile(filePath string) (Config, error) {
 		if !os.IsNotExist(err) {
 			return cfg, fmt.Errorf("config: read %s: %w", filePath, err)
 		}
-	} else {
-		var userCfg Config
-		if err := json.Unmarshal(data, &userCfg); err != nil {
-			return cfg, fmt.Errorf("config: parse %s: %w", filePath, err)
-		}
-		if userCfg.Summarizer.ClaudeModel != "" {
-			cfg.Summarizer.ClaudeModel = userCfg.Summarizer.ClaudeModel
-		}
-		if userCfg.Summarizer.AntigravityModel != "" {
-			cfg.Summarizer.AntigravityModel = userCfg.Summarizer.AntigravityModel
-		}
-		if userCfg.Summarizer.AntigravityEffort != "" {
-			cfg.Summarizer.AntigravityEffort = userCfg.Summarizer.AntigravityEffort
-		}
+	} else if err := json.Unmarshal(data, &cfg); err != nil {
+		return cfg, fmt.Errorf("config: parse %s: %w", filePath, err)
 	}
 
 	// Environment variable overrides

@@ -258,15 +258,9 @@ func (s *Server) handleToolsCall(ctx context.Context, req *Request) error {
 }
 
 func normalizePath(pathStr string) string {
-	if pathStr == "" {
-		cwd, err := os.Getwd()
-		if err == nil {
-			pathStr = cwd
-		}
-	}
 	abs, err := filepath.Abs(pathStr)
 	if err == nil {
-		return filepath.Clean(abs)
+		return abs
 	}
 	return filepath.Clean(pathStr)
 }

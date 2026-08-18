@@ -1,16 +1,32 @@
 package antigravity
 
 import (
+	"encoding/binary"
 	"reflect"
 	"testing"
-
-	"google.golang.org/protobuf/encoding/protowire"
 )
+
+func appendTag(b []byte, num int, wireType int) []byte {
+	return binary.AppendUvarint(b, uint64(num<<3|wireType))
+}
+
+func appendVarint(b []byte, v uint64) []byte {
+	return binary.AppendUvarint(b, v)
+}
+
+func appendBytes(b []byte, v []byte) []byte {
+	b = binary.AppendUvarint(b, uint64(len(v)))
+	return append(b, v...)
+}
+
+func appendString(b []byte, s string) []byte {
+	return appendBytes(b, []byte(s))
+}
 
 func TestExtractStringsRecoversTopLevelStringField(t *testing.T) {
 	var buf []byte
-	buf = protowire.AppendTag(buf, 1, protowire.BytesType)
-	buf = protowire.AppendString(buf, "Append a line 'foo' to sample.txt")
+	buf = appendTag(buf, 1, wireBytes)
+	buf = appendString(buf, "Append a line 'foo' to sample.txt")
 
 	got := ExtractStrings(buf)
 	want := []string{"Append a line 'foo' to sample.txt"}
@@ -31,8 +47,8 @@ func TestExtractStringsPreservesMultiLineText(t *testing.T) {
 	text := "line one\nline two\twith a tab\nline three"
 
 	var buf []byte
-	buf = protowire.AppendTag(buf, 1, protowire.BytesType)
-	buf = protowire.AppendString(buf, text)
+	buf = appendTag(buf, 1, wireBytes)
+	buf = appendString(buf, text)
 
 	got := ExtractStrings(buf)
 	want := []string{text}
@@ -43,14 +59,14 @@ func TestExtractStringsPreservesMultiLineText(t *testing.T) {
 
 func TestExtractStringsRecursesIntoNestedMessages(t *testing.T) {
 	var inner []byte
-	inner = protowire.AppendTag(inner, 1, protowire.BytesType)
-	inner = protowire.AppendString(inner, "nested tool name")
-	inner = protowire.AppendTag(inner, 2, protowire.VarintType)
-	inner = protowire.AppendVarint(inner, 42)
+	inner = appendTag(inner, 1, wireBytes)
+	inner = appendString(inner, "nested tool name")
+	inner = appendTag(inner, 2, wireVarint)
+	inner = appendVarint(inner, 42)
 
 	var outer []byte
-	outer = protowire.AppendTag(outer, 3, protowire.BytesType)
-	outer = protowire.AppendBytes(outer, inner)
+	outer = appendTag(outer, 3, wireBytes)
+	outer = appendBytes(outer, inner)
 
 	got := ExtractStrings(outer)
 	want := []string{"nested tool name"}
@@ -61,10 +77,10 @@ func TestExtractStringsRecursesIntoNestedMessages(t *testing.T) {
 
 func TestExtractStringsIgnoresShortAndBinaryNoise(t *testing.T) {
 	var buf []byte
-	buf = protowire.AppendTag(buf, 1, protowire.BytesType)
-	buf = protowire.AppendBytes(buf, []byte{0x00, 0x01, 0xff, 0xfe})
-	buf = protowire.AppendTag(buf, 2, protowire.BytesType)
-	buf = protowire.AppendString(buf, "ok") // shorter than minStringLen
+	buf = appendTag(buf, 1, wireBytes)
+	buf = appendBytes(buf, []byte{0x00, 0x01, 0xff, 0xfe})
+	buf = appendTag(buf, 2, wireBytes)
+	buf = appendString(buf, "ok") // shorter than minStringLen
 
 	got := ExtractStrings(buf)
 	if len(got) != 0 {
@@ -81,7 +97,7 @@ func TestExtractStringsOnEmptyInputReturnsNil(t *testing.T) {
 
 func TestExtractStringsOnTruncatedInputStopsGracefully(t *testing.T) {
 	var buf []byte
-	buf = protowire.AppendTag(buf, 1, protowire.BytesType)
+	buf = appendTag(buf, 1, wireBytes)
 	buf = append(buf, 0x05) // claims a 5-byte string but provides none -- truncated
 	got := ExtractStrings(buf) // must not panic
 	if len(got) != 0 {
@@ -98,15 +114,15 @@ func TestExtractStringsDeeplyNestedDoesNotStackOverflow(t *testing.T) {
 
 	// Innermost: a BytesType field containing the canary string.
 	var innermost []byte
-	innermost = protowire.AppendTag(innermost, 1, protowire.BytesType)
-	innermost = protowire.AppendString(innermost, canary)
+	innermost = appendTag(innermost, 1, wireBytes)
+	innermost = appendString(innermost, canary)
 
 	// Wrap the canary in wrappingDepth layers of empty BytesType fields.
 	nested := innermost
 	for i := 0; i < wrappingDepth; i++ {
 		var wrapper []byte
-		wrapper = protowire.AppendTag(wrapper, 1, protowire.BytesType)
-		wrapper = protowire.AppendBytes(wrapper, nested)
+		wrapper = appendTag(wrapper, 1, wireBytes)
+		wrapper = appendBytes(wrapper, nested)
 		nested = wrapper
 	}
 

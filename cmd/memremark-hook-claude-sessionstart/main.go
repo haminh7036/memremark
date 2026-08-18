@@ -25,9 +25,6 @@ func main() {
 		// Never fail the hook's exit code -- a broken memory feature must
 		// not block the user from starting a Claude Code session.
 	}
-	if summaries == nil {
-		summaries = []storage.Drawer{}
-	}
 	if err := json.NewEncoder(os.Stdout).Encode(buildOutput(summaries)); err != nil {
 		fmt.Fprintln(os.Stderr, "memremark-hook-claude-sessionstart: failed to encode output:", err)
 	}

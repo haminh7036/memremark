@@ -271,6 +271,20 @@ func TestMCP_PathNormalization(t *testing.T) {
 	if !strings.Contains(firstItem["text"].(string), "Normalized Fact") {
 		t.Fatalf("expected normalized path to match: %v", firstItem["text"])
 	}
+
+	// Empty wing_path defaults to current working directory
+	_ = storeRemember(s, in, out, "Cwd Fact", "fact", "")
+	searchEmptyReq := `{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"search_memory","arguments":{"wing_path":""}}}`
+	resp, err = sendRequest(s, in, out, searchEmptyReq)
+	if err != nil || resp == nil {
+		t.Fatalf("search with empty wing_path failed: %v", err)
+	}
+	resMap = resp.Result.(map[string]interface{})
+	contentArr = resMap["content"].([]interface{})
+	firstItem = contentArr[0].(map[string]interface{})
+	if !strings.Contains(firstItem["text"].(string), "Cwd Fact") {
+		t.Fatalf("expected empty wing_path to match cwd: %v", firstItem["text"])
+	}
 }
 
 func storeRemember(s *Server, in, out *bytes.Buffer, content, hall, path string) *Response {

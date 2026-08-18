@@ -20,7 +20,6 @@ CREATE TABLE IF NOT EXISTS wings (
 CREATE TABLE IF NOT EXISTS drawers (
 	id INTEGER PRIMARY KEY,
 	wing_id INTEGER NOT NULL REFERENCES wings(id),
-	room TEXT,
 	type TEXT NOT NULL CHECK (type IN ('verbatim','summary')),
 	hall TEXT NOT NULL CHECK (hall IN ('event','fact','discovery','preference','advice')),
 	content TEXT NOT NULL,
