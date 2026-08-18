@@ -810,9 +810,13 @@ kill $PID
 ```
 Expected: HTTP 200 OK responses with valid JSON and HTML.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Update documentation in `README.md`**
+  - Add `memremark-ui` usage section (command options `--host`, `--port`, `--no-open`, `--db`).
+  - Update binary and feature lists in `README.md` table.
+
+- [ ] **Step 6: Commit**
 
 ```bash
-git add Makefile install.sh
-git commit -m "feat(build): integrate memremark-ui into Makefile and install script"
+git add Makefile install.sh README.md
+git commit -m "feat(build): integrate memremark-ui into Makefile, install script, and README docs"
 ```
