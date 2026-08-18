@@ -25,7 +25,21 @@ type claudeCodeResult struct {
 }
 
 // ClaudeCodeInvoker runs prompts through `claude -p --output-format json`.
-type ClaudeCodeInvoker struct{}
+type ClaudeCodeInvoker struct {
+	Model string
+}
+
+func (inv ClaudeCodeInvoker) buildArgs() []string {
+	args := []string{"-p", "--output-format", "json", "--safe-mode", "--tools", ""}
+	model := inv.Model
+	if model == "" {
+		model = "haiku"
+	}
+	if model != "default" && model != "none" {
+		args = append(args, "--model", model)
+	}
+	return args
+}
 
 // Invoke implements Invoker.
 //
@@ -35,8 +49,8 @@ type ClaudeCodeInvoker struct{}
 // failed with "argument list too long" forever (nothing ever advanced the
 // retry cursor). `claude -p` (empirically verified) reads the prompt from
 // stdin when no positional prompt arg is given, which has no such limit.
-func (ClaudeCodeInvoker) Invoke(ctx context.Context, prompt string) (string, error) {
-	cmd := exec.CommandContext(ctx, "claude", "-p", "--output-format", "json")
+func (inv ClaudeCodeInvoker) Invoke(ctx context.Context, prompt string) (string, error) {
+	cmd := exec.CommandContext(ctx, "claude", inv.buildArgs()...)
 	cmd.Stdin = strings.NewReader(prompt)
 	out, err := cmd.Output()
 	if err != nil {
@@ -59,11 +73,34 @@ type antigravityResult struct {
 }
 
 // AntigravityInvoker runs prompts through `agy -p --output-format json`.
-type AntigravityInvoker struct{}
+type AntigravityInvoker struct {
+	Model  string
+	Effort string
+}
+
+func (inv AntigravityInvoker) buildArgs(prompt string) []string {
+	args := []string{"-p", prompt, "--output-format", "json", "--disable-slash-commands"}
+	model := inv.Model
+	if model == "" {
+		model = "gemini-3.7-flash-low"
+	}
+	if model != "default" && model != "none" {
+		args = append(args, "--model", model)
+	}
+	effort := inv.Effort
+	if effort == "" {
+		effort = "low"
+	}
+	if effort != "default" && effort != "none" {
+		args = append(args, "--effort", effort)
+	}
+	return args
+}
 
 // Invoke implements Invoker.
-func (AntigravityInvoker) Invoke(ctx context.Context, prompt string) (string, error) {
-	out, err := exec.CommandContext(ctx, "agy", "-p", prompt, "--output-format", "json").Output()
+func (inv AntigravityInvoker) Invoke(ctx context.Context, prompt string) (string, error) {
+	cmd := exec.CommandContext(ctx, "agy", inv.buildArgs(prompt)...)
+	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("summarizer: agy -p failed: %w", err)
 	}

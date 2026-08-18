@@ -370,3 +370,84 @@ func TestFallbackInvoker_ConcurrentRace(t *testing.T) {
 	wg.Wait()
 }
 
+func TestClaudeCodeInvoker_BuildArgs(t *testing.T) {
+	tests := []struct {
+		name     string
+		invoker  ClaudeCodeInvoker
+		wantArgs []string
+	}{
+		{
+			name:     "default empty uses default model haiku",
+			invoker:  ClaudeCodeInvoker{},
+			wantArgs: []string{"-p", "--output-format", "json", "--safe-mode", "--tools", "", "--model", "haiku"},
+		},
+		{
+			name:     "custom model specifies model flag",
+			invoker:  ClaudeCodeInvoker{Model: "claude-3-5-sonnet"},
+			wantArgs: []string{"-p", "--output-format", "json", "--safe-mode", "--tools", "", "--model", "claude-3-5-sonnet"},
+		},
+		{
+			name:     "keyword 'default' omits model flag",
+			invoker:  ClaudeCodeInvoker{Model: "default"},
+			wantArgs: []string{"-p", "--output-format", "json", "--safe-mode", "--tools", ""},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := tt.invoker.buildArgs()
+			if len(args) != len(tt.wantArgs) {
+				t.Fatalf("got args %v, want %v", args, tt.wantArgs)
+			}
+			for i := range args {
+				if args[i] != tt.wantArgs[i] {
+					t.Errorf("arg[%d] = %q, want %q", i, args[i], tt.wantArgs[i])
+				}
+			}
+		})
+	}
+}
+
+func TestAntigravityInvoker_BuildArgs(t *testing.T) {
+	tests := []struct {
+		name     string
+		invoker  AntigravityInvoker
+		prompt   string
+		wantArgs []string
+	}{
+		{
+			name:     "default empty uses default model and low effort",
+			invoker:  AntigravityInvoker{},
+			prompt:   "test prompt",
+			wantArgs: []string{"-p", "test prompt", "--output-format", "json", "--disable-slash-commands", "--model", "gemini-3.7-flash-low", "--effort", "low"},
+		},
+		{
+			name:     "custom model and effort",
+			invoker:  AntigravityInvoker{Model: "gemini-3.5-flash-low", Effort: "medium"},
+			prompt:   "test prompt",
+			wantArgs: []string{"-p", "test prompt", "--output-format", "json", "--disable-slash-commands", "--model", "gemini-3.5-flash-low", "--effort", "medium"},
+		},
+		{
+			name:     "keyword 'default' omits model and effort",
+			invoker:  AntigravityInvoker{Model: "default", Effort: "default"},
+			prompt:   "test prompt",
+			wantArgs: []string{"-p", "test prompt", "--output-format", "json", "--disable-slash-commands"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := tt.invoker.buildArgs(tt.prompt)
+			if len(args) != len(tt.wantArgs) {
+				t.Fatalf("got args %v, want %v", args, tt.wantArgs)
+			}
+			for i := range args {
+				if args[i] != tt.wantArgs[i] {
+					t.Errorf("arg[%d] = %q, want %q", i, args[i], tt.wantArgs[i])
+				}
+			}
+		})
+	}
+}
+
+
