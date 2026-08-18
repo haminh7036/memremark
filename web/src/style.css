@@ -8,6 +8,10 @@
   code, pre, kbd {
     font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   }
+
+  button, [type='button'], [type='reset'], [type='submit'], select, a, [role='button'] {
+    cursor: pointer;
+  }
 }
 
 /* Custom scrollbar */

@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
-import { refDebounced } from '@vueuse/core'
+import { refDebounced, useWindowScroll } from '@vueuse/core'
+import { ArrowUp } from 'lucide-vue-next'
 import Header from './components/Header.vue'
 import ControlBar from './components/ControlBar.vue'
 import TimelineView from './components/TimelineView.vue'
@@ -22,7 +23,7 @@ const timeline = ref([])
 
 const selectedWing = ref(null)
 const selectedHall = ref('')
-const selectedType = ref('')
+const selectedType = ref('summary') // Default to clean Distilled Memories
 const searchQuery = ref('')
 const debouncedSearch = refDebounced(searchQuery, 250)
 
@@ -31,16 +32,22 @@ const autoPollInterval = ref(0)
 const lastUpdated = ref(null)
 const fetchError = ref(null)
 
+const { y } = useWindowScroll({ behavior: 'smooth' })
+
 let pollTimer = null
 
 const hasFilters = computed(() => {
   return Boolean(
     selectedWing.value !== null ||
     selectedHall.value !== '' ||
-    selectedType.value !== '' ||
+    (selectedType.value !== '' && selectedType.value !== 'summary') ||
     searchQuery.value.trim() !== ''
   )
 })
+
+function scrollToTop() {
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
 
 async function fetchWings() {
   try {
@@ -100,7 +107,7 @@ async function refreshAll() {
 function clearFilters() {
   selectedWing.value = null
   selectedHall.value = ''
-  selectedType.value = ''
+  selectedType.value = 'summary'
   searchQuery.value = ''
 }
 
@@ -168,7 +175,7 @@ onUnmounted(() => {
     />
 
     <!-- Error Banner (if any) -->
-    <div v-if="fetchError" class="bg-red-500/10 border-b border-red-500/20 px-4 py-2 text-center text-xs text-red-600 dark:text-red-400">
+    <div v-if="fetchError" class="bg-red-500/10 border-b border-red-500/20 px-4 py-2 text-center text-xs text-red-600 dark:text-red-400 font-medium">
       Failed to synchronize with server: {{ fetchError }}. Retrying on next poll...
     </div>
 
@@ -183,6 +190,25 @@ onUnmounted(() => {
         @clear-filters="clearFilters"
       />
     </main>
+
+    <!-- Floating Scroll To Top Button -->
+    <transition
+      enter-active-class="transition duration-200 ease-out"
+      enter-from-class="opacity-0 translate-y-4 scale-75"
+      enter-to-class="opacity-100 translate-y-0 scale-100"
+      leave-active-class="transition duration-150 ease-in"
+      leave-from-class="opacity-100 translate-y-0 scale-100"
+      leave-to-class="opacity-0 translate-y-4 scale-75"
+    >
+      <button
+        v-if="y > 250"
+        @click="scrollToTop"
+        title="Scroll to top"
+        class="fixed bottom-6 right-6 z-40 p-3 rounded-full bg-zinc-900/90 dark:bg-zinc-800/90 text-white dark:text-zinc-100 shadow-lg shadow-black/20 border border-zinc-700/60 hover:bg-zinc-800 dark:hover:bg-zinc-700 hover:scale-110 active:scale-95 transition-all cursor-pointer backdrop-blur flex items-center justify-center group"
+      >
+        <ArrowUp class="w-4 h-4 transition-transform group-hover:-translate-y-0.5" />
+      </button>
+    </transition>
 
     <!-- Footer -->
     <footer class="border-t border-zinc-200 dark:border-zinc-800/80 py-4 text-center text-xs text-zinc-400 dark:text-zinc-600 bg-white/50 dark:bg-zinc-950/50">
