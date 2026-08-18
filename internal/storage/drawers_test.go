@@ -2,6 +2,7 @@ package storage
 
 import (
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -224,3 +225,189 @@ func TestLastSummaryCoversToUsesEventTimeNotInsertionWallClock(t *testing.T) {
 		t.Fatalf("expected the late-arriving verbatim row to still be picked up, got %+v", got)
 	}
 }
+
+func TestStore_SearchDrawers_Filters(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "memremark.db")
+	store, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+
+	wingID, _ := store.GetOrCreateWing("/test/ws1")
+	now := time.Now().Truncate(time.Second)
+
+	_ = store.InsertSummaryDrawer(wingID, "s1", HallFact, "Fact about golang compiler", now, now, now)
+	_ = store.InsertSummaryDrawer(wingID, "s1", HallAdvice, "Advice on memory management", now, now, now.Add(time.Second))
+	_ = store.InsertVerbatimDrawer(wingID, "s1", "Bash", "go build -o test", now.Add(2*time.Second))
+
+	// Search by query
+	res, err := store.SearchDrawers(wingID, "golang", "", "", 10)
+	if err != nil || len(res) != 1 || res[0].Hall != HallFact {
+		t.Fatalf("search query failed: got %v, err: %v", res, err)
+	}
+
+	// Search by hall
+	res, err = store.SearchDrawers(wingID, "", HallAdvice, "", 10)
+	if err != nil || len(res) != 1 || res[0].Hall != HallAdvice {
+		t.Fatalf("search hall failed: got %v, err: %v", res, err)
+	}
+
+	// Search by type=verbatim
+	res, err = store.SearchDrawers(wingID, "", "", "verbatim", 10)
+	if err != nil || len(res) != 1 || res[0].ToolName != "Bash" {
+		t.Fatalf("search verbatim failed: got %v, err: %v", res, err)
+	}
+
+	// Limit clamping
+	res, err = store.SearchDrawers(wingID, "", "", "all", 0)
+	if err != nil || len(res) != 3 {
+		t.Fatalf("search limit clamping failed: got %d items", len(res))
+	}
+}
+
+func TestStore_SearchDrawers_SpecialChars(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "memremark.db")
+	store, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+
+	wingID, _ := store.GetOrCreateWing("/test/ws_special")
+	now := time.Now().Truncate(time.Second)
+
+	_ = store.InsertSummaryDrawer(wingID, "s1", HallDiscovery, "Tiết kiệm 50% CPU với 'O'Reilly' optimization_v2", now, now, now)
+
+	// Search with %, _, and quotes
+	for _, q := range []string{"50%", "O'Reilly", "optimization_v2", "Tiết kiệm"} {
+		res, err := store.SearchDrawers(wingID, q, "", "all", 10)
+		if err != nil {
+			t.Fatalf("SearchDrawers failed for %q: %v", q, err)
+		}
+		if len(res) != 1 {
+			t.Fatalf("expected 1 match for %q, got %d", q, len(res))
+		}
+	}
+}
+
+func TestStore_InsertManualSummary_Validation(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "memremark.db")
+	store, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+
+	wingID, _ := store.GetOrCreateWing("/test/ws_manual")
+	now := time.Now()
+
+	// Invalid hall
+	_, err = store.InsertManualSummary(wingID, "invalid_hall", "test", now)
+	if err == nil {
+		t.Fatalf("expected error for invalid hall, got nil")
+	}
+
+	// Valid hall
+	id, err := store.InsertManualSummary(wingID, HallPreference, "Use atomic commits", now)
+	if err != nil || id <= 0 {
+		t.Fatalf("InsertManualSummary failed: id=%d, err=%v", id, err)
+	}
+
+	summaries, err := store.RecentSummaries(wingID, 5)
+	if err != nil || len(summaries) != 1 || summaries[0].ID != id || summaries[0].Content != "Use atomic commits" {
+		t.Fatalf("expected inserted summary in RecentSummaries: %v, err: %v", summaries, err)
+	}
+}
+
+func TestStore_GetTimeline_Ordering(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "memremark.db")
+	store, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+
+	wingID, _ := store.GetOrCreateWing("/test/ws_timeline")
+	baseTime := time.Now().Add(-1 * time.Hour).Truncate(time.Second)
+
+	_ = store.InsertVerbatimDrawer(wingID, "session-1", "Bash", "event 1", baseTime.Add(10*time.Second))
+	_ = store.InsertVerbatimDrawer(wingID, "session-1", "ViewFile", "event 2", baseTime.Add(20*time.Second))
+	_ = store.InsertSummaryDrawer(wingID, "session-1", HallFact, "summary 1", baseTime.Add(10*time.Second), baseTime.Add(20*time.Second), baseTime.Add(30*time.Second))
+	_ = store.InsertVerbatimDrawer(wingID, "session-2", "Bash", "other session event", baseTime.Add(15*time.Second))
+
+	// Get timeline for session-1
+	timeline, err := store.GetTimeline(wingID, "session-1", baseTime, 50)
+	if err != nil {
+		t.Fatalf("GetTimeline failed: %v", err)
+	}
+	if len(timeline) != 3 {
+		t.Fatalf("expected 3 events for session-1, got %d", len(timeline))
+	}
+	if timeline[0].Content != "event 1" || timeline[1].Content != "event 2" || timeline[2].Content != "summary 1" {
+		t.Fatalf("unexpected chronological order: %+v", timeline)
+	}
+}
+
+func TestStore_DeleteDrawer_SuccessAndNotFound(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "memremark.db")
+	store, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+
+	wingID, _ := store.GetOrCreateWing("/test/ws_delete")
+	id, _ := store.InsertManualSummary(wingID, HallAdvice, "Temporary advice", time.Now())
+
+	deleted, err := store.DeleteDrawer(id)
+	if err != nil || !deleted {
+		t.Fatalf("expected drawer to be deleted: %v, err: %v", deleted, err)
+	}
+
+	// Delete again (non-existent)
+	deletedAgain, err := store.DeleteDrawer(id)
+	if err != nil || deletedAgain {
+		t.Fatalf("expected deletedAgain to be false, got: %v, err: %v", deletedAgain, err)
+	}
+}
+
+func TestStore_GetOrCreateWing_Concurrency(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "memremark.db")
+	store, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+
+	var wg sync.WaitGroup
+	errCh := make(chan error, 20)
+	ids := make([]int64, 20)
+
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			id, err := store.GetOrCreateWing("/concurrent/project/path")
+			if err != nil {
+				errCh <- err
+				return
+			}
+			ids[idx] = id
+		}(i)
+	}
+
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		t.Fatalf("concurrency error: %v", err)
+	}
+
+	for i := 1; i < 20; i++ {
+		if ids[i] != ids[0] || ids[i] <= 0 {
+			t.Fatalf("expected same wing ID for all concurrent calls, got: %v", ids)
+		}
+	}
+}
+
