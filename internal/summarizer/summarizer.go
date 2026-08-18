@@ -114,6 +114,14 @@ func (inv AntigravityInvoker) Invoke(ctx context.Context, prompt string) (string
 	return res.Response, nil
 }
 
+// NopInvoker is a no-op invoker used when no supported LLM CLI is available in PATH.
+type NopInvoker struct{}
+
+// Invoke implements Invoker by returning a clear descriptive error.
+func (NopInvoker) Invoke(ctx context.Context, prompt string) (string, error) {
+	return "", fmt.Errorf("summarizer: no active LLM CLI available in PATH")
+}
+
 // FallbackInvoker wraps a Primary and a Fallback invoker.
 // If Primary fails, it automatically delegates to Fallback unless the context
 // was canceled or timed out.

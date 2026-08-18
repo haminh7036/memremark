@@ -140,3 +140,88 @@ func TestConfigWiringAndInvokerSetup(t *testing.T) {
 	}
 }
 
+func TestResolveInvokers_Matrix(t *testing.T) {
+	cfg := config.DefaultConfig()
+
+	tests := []struct {
+		name         string
+		hasClaude    bool
+		hasAgy       bool
+		wantSummary  string
+		checkInvoker func(t *testing.T, setup InvokerSetup)
+	}{
+		{
+			name:        "both claude and agy available",
+			hasClaude:   true,
+			hasAgy:      true,
+			wantSummary: "active invokers: claude (primary/fallback) + agy (primary/fallback)",
+			checkInvoker: func(t *testing.T, setup InvokerSetup) {
+				_, ok1 := setup.ClaudeInvoker.(summarizer.FallbackInvoker)
+				_, ok2 := setup.AntigravityInvoker.(summarizer.FallbackInvoker)
+				if !ok1 || !ok2 {
+					t.Fatalf("expected FallbackInvokers for both, got %T, %T", setup.ClaudeInvoker, setup.AntigravityInvoker)
+				}
+			},
+		},
+		{
+			name:        "claude only available",
+			hasClaude:   true,
+			hasAgy:      false,
+			wantSummary: "active invokers: claude only (agy not found in PATH)",
+			checkInvoker: func(t *testing.T, setup InvokerSetup) {
+				_, ok1 := setup.ClaudeInvoker.(summarizer.ClaudeCodeInvoker)
+				_, ok2 := setup.AntigravityInvoker.(summarizer.ClaudeCodeInvoker)
+				if !ok1 || !ok2 {
+					t.Fatalf("expected ClaudeCodeInvoker for both, got %T, %T", setup.ClaudeInvoker, setup.AntigravityInvoker)
+				}
+			},
+		},
+		{
+			name:        "agy only available",
+			hasClaude:   false,
+			hasAgy:      true,
+			wantSummary: "active invokers: agy only (claude not found in PATH)",
+			checkInvoker: func(t *testing.T, setup InvokerSetup) {
+				_, ok1 := setup.ClaudeInvoker.(summarizer.AntigravityInvoker)
+				_, ok2 := setup.AntigravityInvoker.(summarizer.AntigravityInvoker)
+				if !ok1 || !ok2 {
+					t.Fatalf("expected AntigravityInvoker for both, got %T, %T", setup.ClaudeInvoker, setup.AntigravityInvoker)
+				}
+			},
+		},
+		{
+			name:        "neither CLI available",
+			hasClaude:   false,
+			hasAgy:      false,
+			wantSummary: "warning: neither claude nor agy found in PATH; summarization disabled",
+			checkInvoker: func(t *testing.T, setup InvokerSetup) {
+				_, ok1 := setup.ClaudeInvoker.(summarizer.NopInvoker)
+				_, ok2 := setup.AntigravityInvoker.(summarizer.NopInvoker)
+				if !ok1 || !ok2 {
+					t.Fatalf("expected NopInvoker for both, got %T, %T", setup.ClaudeInvoker, setup.AntigravityInvoker)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockLookPath := func(file string) (string, error) {
+				if file == "claude" && tt.hasClaude {
+					return "/usr/bin/claude", nil
+				}
+				if file == "agy" && tt.hasAgy {
+					return "/usr/bin/agy", nil
+				}
+				return "", os.ErrNotExist
+			}
+
+			setup := resolveInvokers(cfg, mockLookPath)
+			if setup.Summary != tt.wantSummary {
+				t.Errorf("got summary %q, want %q", setup.Summary, tt.wantSummary)
+			}
+			tt.checkInvoker(t, setup)
+		})
+	}
+}
+

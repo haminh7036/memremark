@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"syscall"
@@ -22,6 +23,73 @@ import (
 // include several real CLI invocations if multiple sessions go idle in the
 // same tick, so this is generous, not tight.
 const pollTimeout = 2 * time.Minute
+
+// InvokerSetup holds the configured summarizer invokers and startup status message.
+type InvokerSetup struct {
+	ClaudeInvoker      summarizer.Invoker
+	AntigravityInvoker summarizer.Invoker
+	Summary            string
+}
+
+// resolveInvokers determines the appropriate summarizer invokers based on
+// which AI assistant CLI binaries exist in PATH at daemon startup.
+func resolveInvokers(cfg config.Config, lookPath func(string) (string, error)) InvokerSetup {
+	_, errClaude := lookPath("claude")
+	_, errAgy := lookPath("agy")
+
+	hasClaude := errClaude == nil
+	hasAgy := errAgy == nil
+
+	claudePrimary := summarizer.ClaudeCodeInvoker{
+		Model: cfg.Summarizer.ClaudeModel,
+	}
+	antigravityPrimary := summarizer.AntigravityInvoker{
+		Model:  cfg.Summarizer.AntigravityModel,
+		Effort: cfg.Summarizer.AntigravityEffort,
+	}
+
+	if hasClaude && hasAgy {
+		return InvokerSetup{
+			ClaudeInvoker: summarizer.FallbackInvoker{
+				Primary:  claudePrimary,
+				Fallback: antigravityPrimary,
+				OnFallback: func(err error) {
+					log.Printf("memremarkd: claude summarizer failed (%v), falling back to antigravity", err)
+				},
+			},
+			AntigravityInvoker: summarizer.FallbackInvoker{
+				Primary:  antigravityPrimary,
+				Fallback: claudePrimary,
+				OnFallback: func(err error) {
+					log.Printf("memremarkd: antigravity summarizer failed (%v), falling back to claude", err)
+				},
+			},
+			Summary: "active invokers: claude (primary/fallback) + agy (primary/fallback)",
+		}
+	}
+
+	if hasClaude {
+		return InvokerSetup{
+			ClaudeInvoker:      claudePrimary,
+			AntigravityInvoker: claudePrimary,
+			Summary:            "active invokers: claude only (agy not found in PATH)",
+		}
+	}
+
+	if hasAgy {
+		return InvokerSetup{
+			ClaudeInvoker:      antigravityPrimary,
+			AntigravityInvoker: antigravityPrimary,
+			Summary:            "active invokers: agy only (claude not found in PATH)",
+		}
+	}
+
+	return InvokerSetup{
+		ClaudeInvoker:      summarizer.NopInvoker{},
+		AntigravityInvoker: summarizer.NopInvoker{},
+		Summary:            "warning: neither claude nor agy found in PATH; summarization disabled",
+	}
+}
 
 func main() {
 	home, err := os.UserHomeDir()
@@ -44,32 +112,11 @@ func main() {
 	claudeProjectsRoot := filepath.Join(home, ".claude", "projects")
 	antigravitySummariesDB := filepath.Join(home, ".gemini", "antigravity-cli", "conversation_summaries.db")
 
-	claudePrimary := summarizer.ClaudeCodeInvoker{
-		Model: cfg.Summarizer.ClaudeModel,
-	}
-	antigravityPrimary := summarizer.AntigravityInvoker{
-		Model:  cfg.Summarizer.AntigravityModel,
-		Effort: cfg.Summarizer.AntigravityEffort,
-	}
-
-	claudeInvoker := summarizer.FallbackInvoker{
-		Primary:  claudePrimary,
-		Fallback: antigravityPrimary,
-		OnFallback: func(err error) {
-			log.Printf("memremarkd: claude summarizer failed (%v), falling back to antigravity", err)
-		},
-	}
-
-	antigravityInvoker := summarizer.FallbackInvoker{
-		Primary:  antigravityPrimary,
-		Fallback: claudePrimary,
-		OnFallback: func(err error) {
-			log.Printf("memremarkd: antigravity summarizer failed (%v), falling back to claude", err)
-		},
-	}
+	setup := resolveInvokers(cfg, exec.LookPath)
+	log.Printf("memremarkd: %s", setup.Summary)
 
 	d := daemon.New(store, claudeProjectsRoot, antigravitySummariesDB,
-		claudeInvoker, antigravityInvoker)
+		setup.ClaudeInvoker, setup.AntigravityInvoker)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

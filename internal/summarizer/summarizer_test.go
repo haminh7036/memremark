@@ -450,4 +450,15 @@ func TestAntigravityInvoker_BuildArgs(t *testing.T) {
 	}
 }
 
+func TestNopInvoker(t *testing.T) {
+	var inv NopInvoker
+	_, err := inv.Invoke(context.Background(), "test prompt")
+	if err == nil {
+		t.Fatal("expected error from NopInvoker, got nil")
+	}
+	if !strings.Contains(err.Error(), "no active LLM CLI available in PATH") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
 
