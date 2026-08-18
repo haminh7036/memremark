@@ -220,7 +220,8 @@ if [ "$DO_UNINSTALL" = true ]; then
     rm -f "$BINDIR/memremarkd" \
           "$BINDIR/memremark-hook-claude-sessionstart" \
           "$BINDIR/memremark-hook-antigravity-preinvocation" \
-          "$BINDIR/memremark-mcp"
+          "$BINDIR/memremark-mcp" \
+          "$BINDIR/memremark-ui"
     
     echo "✓ MemRemark successfully uninstalled."
     exit 0
@@ -238,11 +239,13 @@ if [ "$DO_BUILD" = true ]; then
     go build -o "$REPO_DIR/bin/memremark-hook-claude-sessionstart" ./cmd/memremark-hook-claude-sessionstart
     go build -o "$REPO_DIR/bin/memremark-hook-antigravity-preinvocation" ./cmd/memremark-hook-antigravity-preinvocation
     go build -o "$REPO_DIR/bin/memremark-mcp" ./cmd/memremark-mcp
+    go build -o "$REPO_DIR/bin/memremark-ui" ./cmd/memremark-ui
 
     install -m 755 "$REPO_DIR/bin/memremarkd" "$BINDIR/memremarkd"
     install -m 755 "$REPO_DIR/bin/memremark-hook-claude-sessionstart" "$BINDIR/memremark-hook-claude-sessionstart"
     install -m 755 "$REPO_DIR/bin/memremark-hook-antigravity-preinvocation" "$BINDIR/memremark-hook-antigravity-preinvocation"
     install -m 755 "$REPO_DIR/bin/memremark-mcp" "$BINDIR/memremark-mcp"
+    install -m 755 "$REPO_DIR/bin/memremark-ui" "$BINDIR/memremark-ui"
     echo "✓ Binaries installed to $BINDIR"
 fi
 
