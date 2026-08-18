@@ -21,12 +21,12 @@ type hookSpecificOutput struct {
 func main() {
 	summaries, err := run()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "memremark-hook-claude-sessionstart:", err)
+		fmt.Fprintln(os.Stderr, "memremark-hook-claude:", err)
 		// Never fail the hook's exit code -- a broken memory feature must
 		// not block the user from starting a Claude Code session.
 	}
 	if err := json.NewEncoder(os.Stdout).Encode(buildOutput(summaries)); err != nil {
-		fmt.Fprintln(os.Stderr, "memremark-hook-claude-sessionstart: failed to encode output:", err)
+		fmt.Fprintln(os.Stderr, "memremark-hook-claude: failed to encode output:", err)
 	}
 	os.Exit(0)
 }

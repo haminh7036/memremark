@@ -40,22 +40,26 @@ Dự án áp dụng chính sách **Zero-Versioning (`0.Y.Z`)**:
 ## Cài đặt nhanh (Khuyến nghị)
 
 Script `install.sh` sẽ tự động:
-1. Build 5 binary (`memremarkd`, `memremark-hook-claude-sessionstart`, `memremark-hook-antigravity-preinvocation`, `memremark-mcp`, `memremark-ui`) và cài đặt vào `~/.local/bin/`
-2. Cài đặt và bật `systemd user service` để daemon tự chạy nền
-3. **Smart patch** cấu hình hook và MCP server:
+1. **Tự động nhận diện (Auto-detect)** các CLI đã cài đặt (`Claude Code` và `Antigravity CLI`).
+2. Build và cài đặt các binary cần thiết (`memremarkd`, `memremark-mcp`, `memremark-ui`, và các hook tương ứng `memremark-hook-claude`, `memremark-hook-agy`) vào `~/.local/bin/`.
+3. Cài đặt và bật `systemd user service` để daemon tự chạy nền.
+4. **Smart patch** cấu hình hook và MCP server:
    - **Antigravity CLI**: Hook `PreInvocation` vào `~/.gemini/config/hooks.json` và MCP server `memremark` vào `~/.gemini/config/mcp_config.json`
    - **Claude Code**: Hook `SessionStart` vào `~/.claude/settings.json` và MCP server `memremark` vào `~/.claude/mcp.json`
    (Tự tạo bản sao lưu `.bak`, giữ nguyên các cấu hình/hook/MCP server khác).
 
 ```bash
-# Cài đặt toàn bộ (cho cả Antigravity CLI và Claude Code):
+# Tự động nhận diện CLI trên máy và cấu hình:
 ./install.sh
 
-# Hoặc chỉ cấu hình riêng cho Antigravity CLI:
-./install.sh --cli=antigravity-cli
+# Hoặc cài đặt cho cả 2 CLI:
+./install.sh --cli=all
 
-# Hoặc chỉ cấu hình riêng cho Claude Code:
-./install.sh --cli=claude-code
+# Hoặc chỉ cài đặt riêng cho Antigravity CLI:
+./install.sh --cli=agy
+
+# Hoặc chỉ cài đặt riêng cho Claude Code:
+./install.sh --cli=claude
 
 # Để gỡ cài đặt hoàn toàn (gỡ service, xóa binary, gỡ hook & MCP server):
 ./install.sh --uninstall
@@ -181,8 +185,8 @@ Nếu không sử dụng `install.sh`, bạn có thể build và cấu hình th�
 ### 1. Build binary
 ```bash
 go build -o bin/memremarkd ./cmd/memremarkd
-go build -o bin/memremark-hook-claude-sessionstart ./cmd/memremark-hook-claude-sessionstart
-go build -o bin/memremark-hook-antigravity-preinvocation ./cmd/memremark-hook-antigravity-preinvocation
+go build -o bin/memremark-hook-claude ./cmd/memremark-hook-claude
+go build -o bin/memremark-hook-agy ./cmd/memremark-hook-agy
 go build -o bin/memremark-mcp ./cmd/memremark-mcp
 go build -o bin/memremark-ui ./cmd/memremark-ui
 ```
@@ -199,7 +203,7 @@ Thêm vào `~/.claude/settings.json`:
         "hooks": [
           {
             "type": "command",
-            "command": "/duong/dan/toi/memremark-hook-claude-sessionstart"
+            "command": "/duong/dan/toi/memremark-hook-claude"
           }
         ]
       }
@@ -230,7 +234,7 @@ Thêm vào `~/.gemini/config/hooks.json`:
     "PreInvocation": [
       {
         "type": "command",
-        "command": "/duong/dan/toi/memremark-hook-antigravity-preinvocation",
+        "command": "/duong/dan/toi/memremark-hook-agy",
         "timeout": 5
       }
     ]

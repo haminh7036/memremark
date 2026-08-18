@@ -11,8 +11,8 @@ build-web:
 
 build:
 	go build -o bin/memremarkd ./cmd/memremarkd
-	go build -o bin/memremark-hook-claude-sessionstart ./cmd/memremark-hook-claude-sessionstart
-	go build -o bin/memremark-hook-antigravity-preinvocation ./cmd/memremark-hook-antigravity-preinvocation
+	go build -o bin/memremark-hook-claude ./cmd/memremark-hook-claude
+	go build -o bin/memremark-hook-agy ./cmd/memremark-hook-agy
 	go build -o bin/memremark-mcp ./cmd/memremark-mcp
 	go build -o bin/memremark-ui ./cmd/memremark-ui
 

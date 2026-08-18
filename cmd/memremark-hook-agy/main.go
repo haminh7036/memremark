@@ -26,10 +26,10 @@ type injectStep struct {
 func main() {
 	summaries, err := run()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "memremark-hook-antigravity-preinvocation:", err)
+		fmt.Fprintln(os.Stderr, "memremark-hook-agy:", err)
 	}
 	if err := json.NewEncoder(os.Stdout).Encode(buildOutput(summaries)); err != nil {
-		fmt.Fprintln(os.Stderr, "memremark-hook-antigravity-preinvocation: failed to encode output:", err)
+		fmt.Fprintln(os.Stderr, "memremark-hook-agy: failed to encode output:", err)
 	}
 	os.Exit(0)
 }

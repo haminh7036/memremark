@@ -11,7 +11,7 @@ GEMINI_MCP="${GEMINI_MCP:-$HOME/.gemini/config/mcp_config.json}"
 CLAUDE_SETTINGS="${CLAUDE_SETTINGS:-$HOME/.claude/settings.json}"
 CLAUDE_MCP="${CLAUDE_MCP:-$HOME/.claude/mcp.json}"
 
-CLI_TARGET="all"
+CLI_TARGET="auto"
 DO_UNINSTALL=false
 DO_BUILD=true
 DO_SERVICE=true
@@ -21,8 +21,11 @@ usage() {
 Usage: ./install.sh [OPTIONS]
 
 Options:
-  --cli=TARGET      Which CLI hooks & MCP servers to patch: 'antigravity-cli', 'claude-code', or 'all' (default: all)
-                    Aliases: 'antigravity', 'agy', 'claude'
+  --cli=TARGET      Which CLI hooks & MCP servers to install & patch:
+                    'auto' (default: auto-detect installed CLIs),
+                    'antigravity-cli' (or 'agy', 'antigravity'),
+                    'claude-code' (or 'claude'),
+                    'all'
   --prefix=PATH     Installation prefix for binaries (default: \$HOME/.local)
   --no-build        Skip binary build & install (only patch hooks & MCP servers)
   --no-service      Skip systemd service setup
@@ -30,9 +33,10 @@ Options:
   -h, --help        Show this help message
 
 Examples:
-  ./install.sh                                # Install everything (binaries, systemd, all hooks & MCP servers)
-  ./install.sh --cli=antigravity-cli          # Install & patch only Antigravity CLI hooks & MCP
-  ./install.sh --cli=claude-code              # Install & patch only Claude Code hooks & MCP
+  ./install.sh                                # Auto-detect installed CLIs and configure
+  ./install.sh --cli=all                      # Force install for both Antigravity CLI and Claude Code
+  ./install.sh --cli=agy                      # Install & patch only Antigravity CLI
+  ./install.sh --cli=claude                   # Install & patch only Claude Code
   ./install.sh --uninstall                   # Remove all binaries, services, hooks, and MCP configs
 EOF
     exit 0
@@ -102,7 +106,7 @@ if os.path.exists(file_path):
 changed = False
 
 if action == 'patch-antigravity':
-    hook_bin = os.path.join(bindir, 'memremark-hook-antigravity-preinvocation')
+    hook_bin = os.path.join(bindir, 'memremark-hook-agy')
     memremark_hook = {
         'PreInvocation': [
             {
@@ -125,17 +129,18 @@ elif action == 'unpatch-antigravity':
         print(f'• No memremark hook found in {file_path}')
 
 elif action == 'patch-claude':
-    hook_bin = os.path.join(bindir, 'memremark-hook-claude-sessionstart')
+    hook_bin = os.path.join(bindir, 'memremark-hook-claude')
     hooks = data.setdefault('hooks', {})
     session_start = hooks.setdefault('SessionStart', [])
 
-    # Check if memremark hook already exists
+    # Check if memremark hook already exists (support both new and legacy names)
     exists = False
     for entry in session_start:
         for h in entry.get('hooks', []):
-            if 'memremark-hook-claude-sessionstart' in h.get('command', ''):
+            cmd = h.get('command', '')
+            if 'memremark-hook-claude' in cmd or 'memremark-hook-claude-sessionstart' in cmd:
                 exists = True
-                h['command'] = hook_bin  # Update path
+                h['command'] = hook_bin  # Update path & binary name
                 break
         if exists:
             break
@@ -160,7 +165,8 @@ elif action == 'unpatch-claude':
     for entry in session_start:
         is_memremark = False
         for h in entry.get('hooks', []):
-            if 'memremark-hook-claude-sessionstart' in h.get('command', ''):
+            cmd = h.get('command', '')
+            if 'memremark-hook-claude' in cmd or 'memremark-hook-claude-sessionstart' in cmd:
                 is_memremark = True
                 break
         if not is_memremark:
@@ -216,9 +222,11 @@ if [ "$DO_UNINSTALL" = true ]; then
     patch_json_py "unpatch-claude" "$CLAUDE_SETTINGS" "$BINDIR"
     patch_json_py "unpatch-mcp" "$CLAUDE_MCP" "$BINDIR"
 
-    # 3. Remove binaries
+    # 3. Remove binaries (including legacy names)
     rm -f "$BINDIR/memremarkd" \
+          "$BINDIR/memremark-hook-claude" \
           "$BINDIR/memremark-hook-claude-sessionstart" \
+          "$BINDIR/memremark-hook-agy" \
           "$BINDIR/memremark-hook-antigravity-preinvocation" \
           "$BINDIR/memremark-mcp" \
           "$BINDIR/memremark-ui"
@@ -226,6 +234,55 @@ if [ "$DO_UNINSTALL" = true ]; then
     echo "✓ MemRemark successfully uninstalled."
     exit 0
 fi
+
+# Detect installed CLI tools
+HAS_ANTIGRAVITY=false
+HAS_CLAUDE=false
+
+if command -v agy &>/dev/null || command -v antigravity &>/dev/null || [ -d "$HOME/.gemini" ]; then
+    HAS_ANTIGRAVITY=true
+fi
+
+if command -v claude &>/dev/null || [ -d "$HOME/.claude" ]; then
+    HAS_CLAUDE=true
+fi
+
+INSTALL_ANTIGRAVITY=false
+INSTALL_CLAUDE=false
+
+case "$CLI_TARGET" in
+    auto|detect)
+        if [ "$HAS_ANTIGRAVITY" = true ] && [ "$HAS_CLAUDE" = true ]; then
+            echo "• Auto-detected: Antigravity CLI and Claude Code are both installed."
+            INSTALL_ANTIGRAVITY=true
+            INSTALL_CLAUDE=true
+        elif [ "$HAS_ANTIGRAVITY" = true ]; then
+            echo "• Auto-detected: Antigravity CLI found on system."
+            INSTALL_ANTIGRAVITY=true
+        elif [ "$HAS_CLAUDE" = true ]; then
+            echo "• Auto-detected: Claude Code found on system."
+            INSTALL_CLAUDE=true
+        else
+            echo "• Auto-detection: Neither CLI specifically detected. Installing all components by default."
+            INSTALL_ANTIGRAVITY=true
+            INSTALL_CLAUDE=true
+        fi
+        ;;
+    antigravity|antigravity-cli|agy)
+        INSTALL_ANTIGRAVITY=true
+        ;;
+    claude|claude-code)
+        INSTALL_CLAUDE=true
+        ;;
+    all)
+        INSTALL_ANTIGRAVITY=true
+        INSTALL_CLAUDE=true
+        ;;
+    *)
+        echo "Error: Unknown CLI target '$CLI_TARGET'. Use 'auto', 'antigravity-cli', 'claude-code', or 'all'." >&2
+        exit 1
+        ;;
+esac
 
 echo "=== Installing MemRemark ==="
 
@@ -235,17 +292,28 @@ if [ "$DO_BUILD" = true ]; then
     cd "$REPO_DIR"
     mkdir -p "$REPO_DIR/bin" "$BINDIR"
     
+    # Core binaries (always built)
     go build -o "$REPO_DIR/bin/memremarkd" ./cmd/memremarkd
-    go build -o "$REPO_DIR/bin/memremark-hook-claude-sessionstart" ./cmd/memremark-hook-claude-sessionstart
-    go build -o "$REPO_DIR/bin/memremark-hook-antigravity-preinvocation" ./cmd/memremark-hook-antigravity-preinvocation
     go build -o "$REPO_DIR/bin/memremark-mcp" ./cmd/memremark-mcp
     go build -o "$REPO_DIR/bin/memremark-ui" ./cmd/memremark-ui
 
     install -m 755 "$REPO_DIR/bin/memremarkd" "$BINDIR/memremarkd"
-    install -m 755 "$REPO_DIR/bin/memremark-hook-claude-sessionstart" "$BINDIR/memremark-hook-claude-sessionstart"
-    install -m 755 "$REPO_DIR/bin/memremark-hook-antigravity-preinvocation" "$BINDIR/memremark-hook-antigravity-preinvocation"
     install -m 755 "$REPO_DIR/bin/memremark-mcp" "$BINDIR/memremark-mcp"
     install -m 755 "$REPO_DIR/bin/memremark-ui" "$BINDIR/memremark-ui"
+
+    # Selective hook binaries
+    if [ "$INSTALL_ANTIGRAVITY" = true ]; then
+        go build -o "$REPO_DIR/bin/memremark-hook-agy" ./cmd/memremark-hook-agy
+        install -m 755 "$REPO_DIR/bin/memremark-hook-agy" "$BINDIR/memremark-hook-agy"
+        echo "✓ Built and installed memremark-hook-agy"
+    fi
+
+    if [ "$INSTALL_CLAUDE" = true ]; then
+        go build -o "$REPO_DIR/bin/memremark-hook-claude" ./cmd/memremark-hook-claude
+        install -m 755 "$REPO_DIR/bin/memremark-hook-claude" "$BINDIR/memremark-hook-claude"
+        echo "✓ Built and installed memremark-hook-claude"
+    fi
+
     echo "✓ Binaries installed to $BINDIR"
 fi
 
@@ -258,27 +326,16 @@ if [ "$DO_SERVICE" = true ] && command -v systemctl &>/dev/null; then
     echo "✓ Systemd service 'memremarkd.service' enabled and started."
 fi
 
-# 3. Patch hooks & MCP configuration based on --cli target
-case "$CLI_TARGET" in
-    antigravity|antigravity-cli|agy)
-        patch_json_py "patch-antigravity" "$GEMINI_HOOKS" "$BINDIR"
-        patch_json_py "patch-mcp" "$GEMINI_MCP" "$BINDIR"
-        ;;
-    claude|claude-code)
-        patch_json_py "patch-claude" "$CLAUDE_SETTINGS" "$BINDIR"
-        patch_json_py "patch-mcp" "$CLAUDE_MCP" "$BINDIR"
-        ;;
-    all)
-        patch_json_py "patch-antigravity" "$GEMINI_HOOKS" "$BINDIR"
-        patch_json_py "patch-mcp" "$GEMINI_MCP" "$BINDIR"
-        patch_json_py "patch-claude" "$CLAUDE_SETTINGS" "$BINDIR"
-        patch_json_py "patch-mcp" "$CLAUDE_MCP" "$BINDIR"
-        ;;
-    *)
-        echo "Error: Unknown CLI target '$CLI_TARGET'. Use 'antigravity-cli', 'claude-code', or 'all'." >&2
-        exit 1
-        ;;
-esac
+# 3. Patch hooks & MCP configuration
+if [ "$INSTALL_ANTIGRAVITY" = true ]; then
+    patch_json_py "patch-antigravity" "$GEMINI_HOOKS" "$BINDIR"
+    patch_json_py "patch-mcp" "$GEMINI_MCP" "$BINDIR"
+fi
+
+if [ "$INSTALL_CLAUDE" = true ]; then
+    patch_json_py "patch-claude" "$CLAUDE_SETTINGS" "$BINDIR"
+    patch_json_py "patch-mcp" "$CLAUDE_MCP" "$BINDIR"
+fi
 
 echo ""
 echo "🎉 MemRemark setup complete!"

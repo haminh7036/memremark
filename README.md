@@ -46,22 +46,30 @@ MemRemark follows a **Zero-Versioning (`0.Y.Z`)** policy:
 ## Quick Installation (Recommended)
 
 The `install.sh` script automatically:
-1. Builds all binaries (`memremarkd`, `memremark-hook-claude-sessionstart`, `memremark-hook-antigravity-preinvocation`, `memremark-mcp`, `memremark-ui`) and installs them to `~/.local/bin/`.
-2. Sets up and enables the `systemd --user` background service.
-3. **Smart patches** CLI hook and MCP configurations:
+1. **Auto-detects** installed CLI tools (`Claude Code` and `Antigravity CLI`).
+2. Builds and installs only the necessary binaries (`memremarkd`, `memremark-mcp`, `memremark-ui`, and detected hooks `memremark-hook-claude`, `memremark-hook-agy`) to `~/.local/bin/`.
+3. Sets up and enables the `systemd --user` background service.
+4. **Smart patches** CLI hook and MCP configurations:
    - **Antigravity CLI**: Configures `PreInvocation` hook in `~/.gemini/config/hooks.json` and MCP server in `~/.gemini/config/mcp_config.json`.
    - **Claude Code**: Configures `SessionStart` hook in `~/.claude/settings.json` and MCP server in `~/.claude/mcp.json`.
    *(Creates automated `.bak` backups and preserves all existing settings).*
 
 ```bash
-# Install for both Antigravity CLI and Claude Code:
+# Auto-detect installed CLIs and configure automatically:
 ./install.sh
 
+# Or force install for both Antigravity CLI and Claude Code:
+./install.sh --cli=all
+
 # Or install for Antigravity CLI only:
-./install.sh --cli=antigravity-cli
+./install.sh --cli=agy
 
 # Or install for Claude Code only:
-./install.sh --cli=claude-code
+./install.sh --cli=claude
+
+# Complete uninstall (removes service, binaries, hooks, and MCP servers):
+./install.sh --uninstall
+```
 
 # Complete uninstall (removes service, binaries, hooks, and MCP servers):
 ./install.sh --uninstall
@@ -188,8 +196,8 @@ You can customize models and UI settings in `~/.memremark/config.json`:
 ### 1. Build Binaries
 ```bash
 go build -o bin/memremarkd ./cmd/memremarkd
-go build -o bin/memremark-hook-claude-sessionstart ./cmd/memremark-hook-claude-sessionstart
-go build -o bin/memremark-hook-antigravity-preinvocation ./cmd/memremark-hook-antigravity-preinvocation
+go build -o bin/memremark-hook-claude ./cmd/memremark-hook-claude
+go build -o bin/memremark-hook-agy ./cmd/memremark-hook-agy
 go build -o bin/memremark-mcp ./cmd/memremark-mcp
 go build -o bin/memremark-ui ./cmd/memremark-ui
 ```
@@ -205,7 +213,7 @@ Add to `~/.claude/settings.json`:
         "hooks": [
           {
             "type": "command",
-            "command": "/path/to/memremark-hook-claude-sessionstart"
+            "command": "/path/to/memremark-hook-claude"
           }
         ]
       }
@@ -233,7 +241,7 @@ Add to `~/.gemini/config/hooks.json`:
     "PreInvocation": [
       {
         "type": "command",
-        "command": "/path/to/memremark-hook-antigravity-preinvocation",
+        "command": "/path/to/memremark-hook-agy",
         "timeout": 5
       }
     ]

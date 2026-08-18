@@ -3,9 +3,10 @@
 # Binaries & build artifacts
 /bin/
 /memremarkd
-/memremark-hook-claude-sessionstart
-/memremark-hook-antigravity-preinvocation
+/memremark-hook-claude
+/memremark-hook-agy
 /memremark-mcp
+/memremark-ui
 
 # Test binaries & databases
 *.test
