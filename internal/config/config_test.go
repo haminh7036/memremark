@@ -83,3 +83,19 @@ func TestLoad_EnvOverrides(t *testing.T) {
 		t.Errorf("expected env override for effort, got %q", cfg.Summarizer.AntigravityEffort)
 	}
 }
+
+func TestLoad_MalformedJSONReturnsError(t *testing.T) {
+	tmpDir := t.TempDir()
+	memDir := filepath.Join(tmpDir, ".memremark")
+	if err := os.MkdirAll(memDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(memDir, "config.json"), []byte("{not-valid-json"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load(tmpDir)
+	if err == nil {
+		t.Fatal("expected error on malformed JSON, got nil")
+	}
+}
