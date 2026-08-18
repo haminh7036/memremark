@@ -67,6 +67,13 @@ func TestMCP_Initialize(t *testing.T) {
 	if resMap["protocolVersion"] != "2024-11-05" {
 		t.Fatalf("unexpected protocolVersion: %v", resMap["protocolVersion"])
 	}
+	serverInfo, ok := resMap["serverInfo"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("missing or invalid serverInfo: %v", resMap["serverInfo"])
+	}
+	if serverInfo["name"] != "memremark-mcp" || serverInfo["version"] != "0.1.0" {
+		t.Fatalf("unexpected serverInfo: %v", serverInfo)
+	}
 }
 
 func TestMCP_NotificationInitialized(t *testing.T) {

@@ -25,13 +25,21 @@ MemRemark operates as an **Active Memory Palace**:
 ---
 
 ## Project Status & Roadmap
-- **Phase 1: Core Engine, MCP Server & Web Dashboard (Single Host)** — **100% Complete & Fully Tested**
+- **Phase 1: Core Engine, MCP Server & Web Dashboard (Single Host)** — **`v0.1.0` (Complete & Tested)**
   - Transcript tailing & SQLite state capture for Claude Code and Antigravity CLI.
   - Headless background summarizer daemon with bidirectional auto-fallback.
   - Seamless context injection hooks (`SessionStart` and `PreInvocation`).
   - Model Context Protocol (MCP) server with 4 tools (`search_memory`, `remember`, `get_timeline`, `forget_memory`).
   - Interactive Web Dashboard (`memremark-ui`) with Vue 3.5 + Tailwind v4 timeline.
-- **Phase 2: Sync Layer (Multi-Device Sync)** — *Planned*.
+- **Phase 2: Sync Layer (Multi-Device Sync)** — *Planned (`v0.2.0`)*.
+
+### Versioning Convention (Zero-Versioning)
+MemRemark follows a **Zero-Versioning (`0.Y.Z`)** policy:
+- **`v0.1.0` (Phase 1 Baseline)**: Feature-complete single-host release (daemon, hooks, MCP server, web UI).
+- **`v0.1.x`**: Bug fixes, performance improvements, and patch updates for Phase 1.
+- **`v0.2.0` (Phase 2 Baseline)**: Multi-device sync layer and cross-host synchronization.
+- **`v0.2.x`**: Protocol enhancements, optimizations, and patch fixes for Phase 2.
+- **`v0.Y.0`**: Subsequent major architectural phases and feature milestones increment `Y`.
 
 ---
 

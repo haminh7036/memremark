@@ -199,7 +199,7 @@ type Server struct {
 
 ### 6.2. Supported RPC Methods
 1. `initialize`:
-   - Returns protocol version `"2024-11-05"`, server info (`name: "memremark-mcp"`, `version: "1.0.0"`), and capabilities (`tools: {}`).
+   - Returns protocol version `"2024-11-05"`, server info (`name: "memremark-mcp"`, `version: "0.1.0"`), and capabilities (`tools: {}`).
 2. `notifications/initialized`:
    - Acknowledgement, no response emitted.
 3. `tools/list`:

@@ -21,13 +21,21 @@ MemRemark hoạt động theo mô hình **Active Memory Palace**:
 5. **Trực quan hóa (Timeline Dashboard)**: Cung cấp Web UI độc lập (`memremark-ui`) xem dòng thời gian tri thức theo từng workspace.
 
 ## Trạng thái dự án & Lộ trình
-- **Phase 1: Core Engine, MCP Server & Web Dashboard (Single Host)** — **Hoàn thành 100% & Kiểm thử toàn diện**
+- **Phase 1: Core Engine, MCP Server & Web Dashboard (Single Host)** — **`v0.1.0` (Hoàn thành & Đã kiểm thử)**
   - Tự động trích xuất transcript từ Claude Code và Antigravity CLI.
   - Daemon tóm tắt chạy nền với cơ chế tự động Fallback 2 chiều.
   - CLI Hooks nạp ngữ cảnh tự động cho Claude Code và Antigravity CLI.
   - MCP stdio server với 4 tools (`search_memory`, `remember`, `get_timeline`, `forget_memory`).
   - Web Dashboard dòng thời gian Vue 3.5 + Tailwind v4 nhúng trực tiếp trong Go binary (`memremark-ui`).
-- **Phase 2: Sync Layer (Đồng bộ đa thiết bị)** — *Kế hoạch tiếp theo*.
+- **Phase 2: Sync Layer (Đồng bộ đa thiết bị)** — *Kế hoạch tiếp theo (`v0.2.0`)*.
+
+### Quy ước phiên bản (Zero-Versioning)
+Dự án áp dụng chính sách **Zero-Versioning (`0.Y.Z`)**:
+- **`v0.1.0` (Mốc Phase 1)**: Bản phát hành hoàn thiện tính năng cho máy đơn (daemon, hooks, MCP server, web UI).
+- **`v0.1.x`**: Tăng patch version cho các bản sửa lỗi (bug fixes), tối ưu hiệu năng và tinh chỉnh nhỏ trong Phase 1.
+- **`v0.2.0` (Mốc Phase 2)**: Bắt đầu tính năng Sync Layer (đồng bộ dữ liệu đa thiết bị).
+- **`v0.2.x`**: Các bản vá lỗi, tối ưu giao thức và nâng cấp cho Sync Layer.
+- **`v0.Y.0`**: Các phase kiến trúc / mốc tính năng lớn tiếp theo sẽ tăng số `Y`.
 
 ## Cài đặt nhanh (Khuyến nghị)
 

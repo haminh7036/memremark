@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/haminh7036/memremark/internal/storage"
+	"github.com/haminh7036/memremark/internal/version"
 )
 
 type Server struct {
@@ -132,7 +133,7 @@ func (s *Server) handleInitialize(req *Request) error {
 			"protocolVersion": "2024-11-05",
 			"serverInfo": map[string]interface{}{
 				"name":    "memremark-mcp",
-				"version": "1.0.0",
+				"version": version.Version,
 			},
 			"capabilities": map[string]interface{}{
 				"tools": map[string]interface{}{},

@@ -515,7 +515,7 @@ git commit -m "feat(ui): add REST API endpoints and static SPA server"
 {
   "name": "memremark-web",
   "private": true,
-  "version": "1.0.0",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",

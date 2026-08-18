@@ -947,7 +947,7 @@ func (s *Server) handleInitialize(req *Request) error {
 			"protocolVersion": "2024-11-05",
 			"serverInfo": map[string]interface{}{
 				"name":    "memremark-mcp",
-				"version": "1.0.0",
+				"version": "0.1.0",
 			},
 			"capabilities": map[string]interface{}{
 				"tools": map[string]interface{}{},
