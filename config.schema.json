@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MemRemark Config",
+  "description": "Schema for ~/.memremark/config.json",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "language": {
+      "type": "string",
+      "description": "Output language override (e.g. 'auto', 'en', 'vi', 'ja'). Falls back to $LC_ALL / $LC_MESSAGES / $LANG when 'auto'.",
+      "default": "auto"
+    },
+    "summarizer": {
+      "type": "object",
+      "properties": {
+        "claude_model": {
+          "type": "string",
+          "description": "Claude Code model (e.g. 'haiku', 'claude-3-5-sonnet', 'default').",
+          "default": "haiku"
+        },
+        "antigravity_model": {
+          "type": "string",
+          "description": "Antigravity CLI model (e.g. 'gemini-3.7-flash-low', 'flash_lite', 'default').",
+          "default": "gemini-3.7-flash-low"
+        },
+        "antigravity_effort": {
+          "type": "string",
+          "enum": ["low", "medium", "high", "default"],
+          "default": "low"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ui": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string",
+          "default": "127.0.0.1"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "default": 8765
+        },
+        "auto_open": {
+          "type": "boolean",
+          "default": true
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

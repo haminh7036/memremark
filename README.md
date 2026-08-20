@@ -171,6 +171,7 @@ You can customize models and UI settings in `~/.memremark/config.json`:
 
 ```json
 {
+  "$schema": "./config.schema.json",
   "language": "auto",
   "summarizer": {
     "claude_model": "haiku",
@@ -185,6 +186,7 @@ You can customize models and UI settings in `~/.memremark/config.json`:
 }
 ```
 
+* **Schema:** `install.sh` installs `config.schema.json` next to `config.json` in `~/.memremark/` for IDE validation/autocomplete.
 * **Precedence:** Environment variables (`MEMREMARK_*`) > `config.json` > Default fallback.
 * **Note:** `memremark-ui` also accepts `--host`, `--port`, `--db`, `--no-open` flags, which take precedence over everything above.
 * **Environment variables:**

@@ -230,7 +230,8 @@ if [ "$DO_UNINSTALL" = true ]; then
           "$BINDIR/memremark-hook-antigravity-preinvocation" \
           "$BINDIR/memremark-mcp" \
           "$BINDIR/memremark-ui"
-    
+    rm -f "$HOME/.memremark/config.schema.json"
+
     echo "✓ MemRemark successfully uninstalled."
     exit 0
 fi
@@ -316,6 +317,10 @@ if [ "$DO_BUILD" = true ]; then
 
     echo "✓ Binaries installed to $BINDIR"
 fi
+
+# Install config JSON schema for IDE autocomplete/validation
+mkdir -p "$HOME/.memremark"
+install -m 644 "$REPO_DIR/config.schema.json" "$HOME/.memremark/config.schema.json"
 
 # 2. Systemd service setup
 if [ "$DO_SERVICE" = true ] && command -v systemctl &>/dev/null; then

@@ -157,6 +157,7 @@ Bạn có thể tùy chỉnh model và dashboard qua file `~/.memremark/config.j
 
 ```json
 {
+  "$schema": "./config.schema.json",
   "language": "auto",
   "summarizer": {
     "claude_model": "haiku",
@@ -171,6 +172,7 @@ Bạn có thể tùy chỉnh model và dashboard qua file `~/.memremark/config.j
 }
 ```
 
+* **Schema:** `install.sh` cài `config.schema.json` cạnh `config.json` trong `~/.memremark/` để IDE validate/autocomplete.
 * **Thứ tự ưu tiên cấu hình:** Biến môi trường (`MEMREMARK_*`) > File `config.json` > Mặc định hệ thống.
 * **Lưu ý:** Riêng `memremark-ui` còn nhận flag `--host`, `--port`, `--db`, `--no-open`, và các flag này ưu tiên cao hơn tất cả các mục trên.
 * **Biến môi trường hỗ trợ:**
