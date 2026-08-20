@@ -21,7 +21,7 @@ MemRemark hoạt động theo mô hình **Active Memory Palace**:
 5. **Trực quan hóa (Timeline Dashboard)**: Cung cấp Web UI độc lập (`memremark-ui`) xem dòng thời gian tri thức theo từng workspace.
 
 ## Trạng thái dự án & Lộ trình
-- **Phase 1: Core Engine, MCP Server & Web Dashboard (Single Host)** — **`v0.1.2` (Hoàn thành & Đã kiểm thử)**
+- **Phase 1: Core Engine, MCP Server & Web Dashboard (Single Host)** — **`v0.1.3` (Hoàn thành & Đã kiểm thử)**
   - Tự động trích xuất transcript từ Claude Code và Antigravity CLI.
   - Daemon tóm tắt chạy nền với **cơ chế tự động phát hiện CLI khi khởi động (Startup Capability Discovery)** và Fallback 2 chiều.
   - **Đúc kết tri thức thích ứng theo ngôn ngữ & quốc gia (Locale-Adaptive)**: Tự động nhận diện locale hệ thống (`$LANG`, `$LC_ALL`), bảo tồn thuật ngữ chuyên ngành và địa phương hóa header nạp bối cảnh.
