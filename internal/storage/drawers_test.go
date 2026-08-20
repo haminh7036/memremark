@@ -405,6 +405,36 @@ func TestStore_DeleteDrawer_SuccessAndNotFound(t *testing.T) {
 	}
 }
 
+func TestStore_DeleteDrawers_BatchAndEmpty(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "memremark.db")
+	store, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+
+	wingID, _ := store.GetOrCreateWing("/test/ws_delete_batch")
+	id1, _ := store.InsertManualSummary(wingID, HallAdvice, "advice 1", time.Now())
+	id2, _ := store.InsertManualSummary(wingID, HallAdvice, "advice 2", time.Now())
+	idKept, _ := store.InsertManualSummary(wingID, HallAdvice, "advice kept", time.Now())
+
+	if err := store.DeleteDrawers(nil); err != nil {
+		t.Fatalf("DeleteDrawers(nil) should be a no-op, got err: %v", err)
+	}
+
+	if err := store.DeleteDrawers([]int64{id1, id2}); err != nil {
+		t.Fatalf("DeleteDrawers: %v", err)
+	}
+
+	remaining, err := store.SearchDrawers(wingID, "", "", "summary", 10)
+	if err != nil {
+		t.Fatalf("SearchDrawers: %v", err)
+	}
+	if len(remaining) != 1 || remaining[0].ID != idKept {
+		t.Fatalf("expected only the untouched drawer to remain, got: %+v", remaining)
+	}
+}
+
 func TestStore_GetOrCreateWing_Concurrency(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "memremark.db")
 	store, err := Open(dbPath)

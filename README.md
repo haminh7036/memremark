@@ -25,7 +25,7 @@ MemRemark operates as an **Active Memory Palace**:
 ---
 
 ## Project Status & Roadmap
-- **Phase 1: Core Engine, MCP Server & Web Dashboard (Single Host)** — **`v0.1.3` (Complete & Tested)**
+- **Phase 1: Core Engine, MCP Server & Web Dashboard (Single Host)** — **`v0.1.4` (Complete & Tested)**
   - Transcript tailing & SQLite state capture for Claude Code and Antigravity CLI.
   - Headless background summarizer daemon with **dynamic startup capability discovery** and bidirectional auto-fallback.
   - **Locale-Adaptive Knowledge Distillation**: Auto-detects user environment locale (`$LANG`, `$LC_ALL`) with dual-layer tech term preservation and multi-language context injection headers.
@@ -160,6 +160,8 @@ memremark-ui --no-open
 | **Antigravity MCP** | `~/.gemini/config/mcp_config.json` | MCP server entry for Antigravity CLI |
 | **Claude Code Hook** | `~/.claude/settings.json` | `SessionStart` hook configuration |
 | **Claude Code MCP** | `~/.claude/mcp.json` | MCP server entry for Claude Code |
+
+* **Retention:** Verbatim rows are deleted once distilled into a summary drawer (see `daemon_summarize.go`); the database uses SQLite's incremental auto-vacuum so it shrinks back down instead of growing unbounded.
 
 ---
 

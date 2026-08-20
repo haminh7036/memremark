@@ -111,6 +111,92 @@ func TestSummarizeSessionChunksLargeBacklogAcrossMultipleInvokerCalls(t *testing
 	}
 }
 
+// TestSummarizeSessionPrunesVerbatimAfterSuccessfulSummarize is the
+// regression test for the DB-bloat fix: verbatim rows have done their job
+// once they're distilled into a summary drawer, so they should be deleted
+// rather than accumulating forever (production incident: 101MB DB, 89.9MB
+// of it verbatim rows never cleaned up).
+func TestSummarizeSessionPrunesVerbatimAfterSuccessfulSummarize(t *testing.T) {
+	store, err := storage.Open(tempDBPath(t))
+	if err != nil {
+		t.Fatalf("storage.Open: %v", err)
+	}
+	defer store.Close()
+
+	wingID, err := store.GetOrCreateWing("/tmp/project")
+	if err != nil {
+		t.Fatalf("GetOrCreateWing: %v", err)
+	}
+
+	now := time.Now()
+	if err := store.InsertVerbatimDrawer(wingID, "sess-1", "Bash", "go test ./...", now); err != nil {
+		t.Fatalf("InsertVerbatimDrawer: %v", err)
+	}
+
+	invoker := stubInvoker{reply: `[{"hall":"fact","content":"summarized"}]`}
+	d := New(store, t.TempDir(), t.TempDir()+"/conversation_summaries.db", invoker, invoker)
+	d.sessionWing["sess-1"] = wingID
+	d.sessionInvoker["sess-1"] = invoker
+
+	if err := d.summarizeSession(context.Background(), "sess-1", now); err != nil {
+		t.Fatalf("summarizeSession: %v", err)
+	}
+
+	remaining, err := store.VerbatimSince(wingID, "sess-1", time.Unix(0, 0))
+	if err != nil {
+		t.Fatalf("VerbatimSince: %v", err)
+	}
+	if len(remaining) != 0 {
+		t.Fatalf("expected the summarized verbatim row to be pruned, %d row(s) remain", len(remaining))
+	}
+
+	summaries, err := store.RecentSummaries(wingID, 10)
+	if err != nil {
+		t.Fatalf("RecentSummaries: %v", err)
+	}
+	if len(summaries) != 1 || summaries[0].Content != "summarized" {
+		t.Fatalf("expected the distilled summary to survive pruning, got: %+v", summaries)
+	}
+}
+
+// TestSummarizeSessionKeepsVerbatimWhenInvokerFails ensures a failed
+// summarize call leaves the batch untouched -- pruning must only happen
+// after the verbatim rows have actually been distilled, never before.
+func TestSummarizeSessionKeepsVerbatimWhenInvokerFails(t *testing.T) {
+	store, err := storage.Open(tempDBPath(t))
+	if err != nil {
+		t.Fatalf("storage.Open: %v", err)
+	}
+	defer store.Close()
+
+	wingID, err := store.GetOrCreateWing("/tmp/project")
+	if err != nil {
+		t.Fatalf("GetOrCreateWing: %v", err)
+	}
+
+	now := time.Now()
+	if err := store.InsertVerbatimDrawer(wingID, "sess-1", "Bash", "go test ./...", now); err != nil {
+		t.Fatalf("InsertVerbatimDrawer: %v", err)
+	}
+
+	invoker := stubInvoker{err: errors.New("invoker unavailable")}
+	d := New(store, t.TempDir(), t.TempDir()+"/conversation_summaries.db", invoker, invoker)
+	d.sessionWing["sess-1"] = wingID
+	d.sessionInvoker["sess-1"] = invoker
+
+	if err := d.summarizeSession(context.Background(), "sess-1", now); err == nil {
+		t.Fatalf("expected summarizeSession to return the invoker error")
+	}
+
+	remaining, err := store.VerbatimSince(wingID, "sess-1", time.Unix(0, 0))
+	if err != nil {
+		t.Fatalf("VerbatimSince: %v", err)
+	}
+	if len(remaining) != 1 {
+		t.Fatalf("expected the unsummarized verbatim row to survive a failed summarize, %d row(s) remain", len(remaining))
+	}
+}
+
 func tempDBPath(t *testing.T) string {
 	t.Helper()
 	return t.TempDir() + "/memremark.db"

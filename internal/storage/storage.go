@@ -72,6 +72,26 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("storage: set busy_timeout on %s: %w", path, err)
 	}
+	// auto_vacuum mode only takes effect after a VACUUM, so this one-time
+	// migration cost (real reclaim on an existing DB, near-instant on an
+	// empty one) buys incremental_vacuum support for the life of the file --
+	// pruned rows (see daemon_summarize.go) can then actually shrink it
+	// instead of leaving unreclaimed free pages behind.
+	var autoVacuum int
+	if err := db.QueryRow("PRAGMA auto_vacuum;").Scan(&autoVacuum); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("storage: query auto_vacuum on %s: %w", path, err)
+	}
+	if autoVacuum != 2 {
+		if _, err := db.Exec("PRAGMA auto_vacuum = INCREMENTAL;"); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("storage: set auto_vacuum on %s: %w", path, err)
+		}
+		if _, err := db.Exec("VACUUM;"); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("storage: vacuum %s: %w", path, err)
+		}
+	}
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("storage: apply schema: %w", err)
@@ -148,4 +168,14 @@ func migrateLegacyWings(db *sql.DB) error {
 // Close releases the underlying database handle.
 func (s *Store) Close() error {
 	return s.db.Close()
+}
+
+// IncrementalVacuum reclaims free pages left behind by deleted rows. Cheap
+// no-op if there's nothing to reclaim; requires auto_vacuum=INCREMENTAL
+// (set unconditionally in Open).
+func (s *Store) IncrementalVacuum() error {
+	if _, err := s.db.Exec("PRAGMA incremental_vacuum;"); err != nil {
+		return fmt.Errorf("storage: incremental vacuum: %w", err)
+	}
+	return nil
 }

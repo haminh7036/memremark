@@ -52,6 +52,78 @@ func TestOpenSetsBusyTimeout(t *testing.T) {
 	}
 }
 
+// TestOpenSetsIncrementalAutoVacuum confirms Open enables
+// auto_vacuum=INCREMENTAL (mode 2) on a fresh database, so pruned drawer
+// rows (see daemon_summarize.go) can actually shrink the file via
+// IncrementalVacuum instead of leaving unreclaimed free pages behind.
+func TestOpenSetsIncrementalAutoVacuum(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "memremark.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+
+	var mode int
+	if err := s.db.QueryRow("PRAGMA auto_vacuum;").Scan(&mode); err != nil {
+		t.Fatalf("query auto_vacuum: %v", err)
+	}
+	if mode != 2 {
+		t.Fatalf("expected auto_vacuum mode 2 (incremental), got %d", mode)
+	}
+}
+
+// TestOpenMigratesExistingDBToIncrementalAutoVacuum confirms a database
+// created before this migration (auto_vacuum mode 0, the SQLite default)
+// gets upgraded to incremental on the next Open, not just databases created
+// fresh after this change shipped.
+func TestOpenMigratesExistingDBToIncrementalAutoVacuum(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "memremark.db")
+
+	legacy, err := Open(path)
+	if err != nil {
+		t.Fatalf("first Open: %v", err)
+	}
+	if _, err := legacy.db.Exec("PRAGMA auto_vacuum = NONE; VACUUM;"); err != nil {
+		t.Fatalf("force legacy auto_vacuum=NONE: %v", err)
+	}
+	var mode int
+	if err := legacy.db.QueryRow("PRAGMA auto_vacuum;").Scan(&mode); err != nil {
+		t.Fatalf("query auto_vacuum: %v", err)
+	}
+	if mode != 0 {
+		t.Fatalf("test setup: expected auto_vacuum 0 before migration, got %d", mode)
+	}
+	legacy.Close()
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("second Open (should migrate): %v", err)
+	}
+	defer s.Close()
+
+	if err := s.db.QueryRow("PRAGMA auto_vacuum;").Scan(&mode); err != nil {
+		t.Fatalf("query auto_vacuum after migration: %v", err)
+	}
+	if mode != 2 {
+		t.Fatalf("expected auto_vacuum mode 2 (incremental) after migration, got %d", mode)
+	}
+}
+
+// TestIncrementalVacuumRuns confirms the wrapper executes without error --
+// it's a thin PRAGMA wrapper, so this just guards against a typo'd pragma
+// name or a broken connection breaking every summarize call.
+func TestIncrementalVacuumRuns(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "memremark.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+
+	if err := s.IncrementalVacuum(); err != nil {
+		t.Fatalf("IncrementalVacuum: %v", err)
+	}
+}
+
 // TestOpenSetsRestrictivePermissions asserts the private-activity-log
 // database ends up with a private directory (0700) and a private file
 // (0600), not the driver/OS defaults.

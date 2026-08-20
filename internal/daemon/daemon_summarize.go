@@ -71,6 +71,7 @@ func (d *Daemon) summarizeSessionWithBatchSize(ctx context.Context, sessionID st
 		return err
 	}
 
+	pruned := false
 	for len(verbatim) > 0 {
 		batch := takeBatch(verbatim, maxBatchBytes)
 		verbatim = verbatim[len(batch):]
@@ -91,6 +92,23 @@ func (d *Daemon) summarizeSessionWithBatchSize(ctx context.Context, sessionID st
 			if err := d.Store.InsertSummaryDrawer(wingID, sessionID, item.Hall, item.Content, coversFrom, coversTo, now); err != nil {
 				return err
 			}
+		}
+
+		// The batch is now fully distilled into summary drawers above -- the
+		// raw rows have done their job and can go, so the DB doesn't grow
+		// unbounded forever (see incident: 101MB DB, 89.9MB of it verbatim).
+		ids := make([]int64, len(batch))
+		for i, v := range batch {
+			ids[i] = v.ID
+		}
+		if err := d.Store.DeleteDrawers(ids); err != nil {
+			return err
+		}
+		pruned = true
+	}
+	if pruned {
+		if err := d.Store.IncrementalVacuum(); err != nil {
+			return err
 		}
 	}
 	return nil

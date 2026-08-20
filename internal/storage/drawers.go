@@ -320,6 +320,23 @@ func (s *Store) DeleteDrawer(id int64) (bool, error) {
 	return rowsAffected > 0, nil
 }
 
+// DeleteDrawers deletes multiple drawers by ID in one statement. No-op if ids is empty.
+func (s *Store) DeleteDrawers(ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	args := make([]interface{}, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	_, err := s.db.Exec(fmt.Sprintf(`DELETE FROM drawers WHERE id IN (%s)`, placeholders), args...)
+	if err != nil {
+		return fmt.Errorf("storage: delete drawers: %w", err)
+	}
+	return nil
+}
+
 // WingStats contains a wing's metadata and drawer counts.
 type WingStats struct {
 	ID            int64     `json:"id"`
