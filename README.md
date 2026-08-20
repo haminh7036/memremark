@@ -171,6 +171,7 @@ You can customize models and UI settings in `~/.memremark/config.json`:
 
 ```json
 {
+  "language": "auto",
   "summarizer": {
     "claude_model": "haiku",
     "antigravity_model": "gemini-3.7-flash-low",
@@ -185,7 +186,9 @@ You can customize models and UI settings in `~/.memremark/config.json`:
 ```
 
 * **Precedence:** Environment variables (`MEMREMARK_*`) > `config.json` > Default fallback.
+* **Note:** `memremark-ui` also accepts `--host`, `--port`, `--db`, `--no-open` flags, which take precedence over everything above.
 * **Environment variables:**
+  - `MEMREMARK_LANGUAGE`: Override output language (e.g. `vi`, `en`, `ja`, `auto`). Falls back to `$LC_ALL` / `$LC_MESSAGES` / `$LANG` when unset.
   - `MEMREMARK_CLAUDE_MODEL`: Override Claude model (e.g. `haiku`, `claude-3-5-sonnet`, `default`).
   - `MEMREMARK_ANTIGRAVITY_MODEL`: Override Antigravity model (e.g. `gemini-3.7-flash-low`, `flash_lite`, `default`).
   - `MEMREMARK_ANTIGRAVITY_EFFORT`: Override effort level (`low`, `medium`, `high`, `default`).

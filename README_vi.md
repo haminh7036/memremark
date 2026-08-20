@@ -157,6 +157,7 @@ Bạn có thể tùy chỉnh model và dashboard qua file `~/.memremark/config.j
 
 ```json
 {
+  "language": "auto",
   "summarizer": {
     "claude_model": "haiku",
     "antigravity_model": "gemini-3.7-flash-low",
@@ -171,7 +172,9 @@ Bạn có thể tùy chỉnh model và dashboard qua file `~/.memremark/config.j
 ```
 
 * **Thứ tự ưu tiên cấu hình:** Biến môi trường (`MEMREMARK_*`) > File `config.json` > Mặc định hệ thống.
+* **Lưu ý:** Riêng `memremark-ui` còn nhận flag `--host`, `--port`, `--db`, `--no-open`, và các flag này ưu tiên cao hơn tất cả các mục trên.
 * **Biến môi trường hỗ trợ:**
+  - `MEMREMARK_LANGUAGE`: Đổi ngôn ngữ output (vd: `vi`, `en`, `ja`, `auto`). Nếu không set, fallback về `$LC_ALL` / `$LC_MESSAGES` / `$LANG`.
   - `MEMREMARK_CLAUDE_MODEL`: Đổi model cho Claude (vd: `haiku`, `claude-3-5-sonnet`, `default`).
   - `MEMREMARK_ANTIGRAVITY_MODEL`: Đổi model cho Antigravity (vd: `gemini-3.7-flash-low`, `flash_lite`, `default`).
   - `MEMREMARK_ANTIGRAVITY_EFFORT`: Đổi mức reasoning effort (vd: `low`, `medium`, `high`, `default`).
