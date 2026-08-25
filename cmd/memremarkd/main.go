@@ -122,6 +122,10 @@ func main() {
 	d := daemon.New(store, claudeProjectsRoot, antigravitySummariesDB,
 		setup.ClaudeInvoker, setup.AntigravityInvoker, targetLang)
 
+	if err := d.Warmup(); err != nil {
+		log.Printf("memremarkd: warmup (recover orphaned verbatim sessions) failed: %v", err)
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
