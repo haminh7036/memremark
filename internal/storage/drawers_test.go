@@ -612,4 +612,63 @@ func TestStore_GetGlobalStats(t *testing.T) {
 	}
 }
 
+func TestStore_OrphanedVerbatimSessions(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "memremark.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+
+	wingA, err := s.GetOrCreateWing("/tmp/project-a")
+	if err != nil {
+		t.Fatalf("GetOrCreateWing(a): %v", err)
+	}
+	wingB, err := s.GetOrCreateWing("/tmp/project-b")
+	if err != nil {
+		t.Fatalf("GetOrCreateWing(b): %v", err)
+	}
+
+	now := time.Now()
+	// Two verbatim rows in the same session -- must collapse to one ref.
+	if err := s.InsertVerbatimDrawer(wingA, "sess-orphan-1", "Bash", "cmd 1", now); err != nil {
+		t.Fatalf("InsertVerbatimDrawer: %v", err)
+	}
+	if err := s.InsertVerbatimDrawer(wingA, "sess-orphan-1", "Bash", "cmd 2", now); err != nil {
+		t.Fatalf("InsertVerbatimDrawer: %v", err)
+	}
+	// A second, distinct orphaned session in a different wing.
+	if err := s.InsertVerbatimDrawer(wingB, "sess-orphan-2", "Read", "read foo", now); err != nil {
+		t.Fatalf("InsertVerbatimDrawer: %v", err)
+	}
+	// A session with only a summary row (already fully pruned) must NOT appear.
+	if err := s.InsertSummaryDrawer(wingA, "sess-done", HallFact, "already summarized", now, now, now); err != nil {
+		t.Fatalf("InsertSummaryDrawer: %v", err)
+	}
+
+	refs, err := s.OrphanedVerbatimSessions()
+	if err != nil {
+		t.Fatalf("OrphanedVerbatimSessions: %v", err)
+	}
+
+	got := make(map[SessionRef]bool)
+	for _, r := range refs {
+		got[r] = true
+	}
+	want := map[SessionRef]bool{
+		{WingID: wingA, SessionID: "sess-orphan-1"}: true,
+		{WingID: wingB, SessionID: "sess-orphan-2"}: true,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d distinct session refs, got %d: %+v", len(want), len(got), refs)
+	}
+	for w := range want {
+		if !got[w] {
+			t.Fatalf("expected session ref %+v in result, got %+v", w, refs)
+		}
+	}
+	if got[SessionRef{WingID: wingA, SessionID: "sess-done"}] {
+		t.Fatalf("summary-only session must not appear in orphaned verbatim sessions, got %+v", refs)
+	}
+}
+
 

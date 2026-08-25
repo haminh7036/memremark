@@ -337,6 +337,41 @@ func (s *Store) DeleteDrawers(ids []int64) error {
 	return nil
 }
 
+// SessionRef identifies one session's rows in a specific wing.
+type SessionRef struct {
+	WingID    int64
+	SessionID string
+}
+
+// OrphanedVerbatimSessions returns every distinct (wing_id, session_id) pair
+// that currently has at least one verbatim row. The daemon uses this at
+// startup to recover sessions whose in-memory debounce/tracking state was
+// lost on a previous restart before their idle window fired -- without
+// this, those sessions' verbatim rows would never be summarized or pruned.
+func (s *Store) OrphanedVerbatimSessions() ([]SessionRef, error) {
+	rows, err := s.db.Query(
+		`SELECT DISTINCT wing_id, session_id FROM drawers WHERE type = 'verbatim'`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("storage: query orphaned verbatim sessions: %w", err)
+	}
+	defer rows.Close()
+
+	var refs []SessionRef
+	for rows.Next() {
+		var ref SessionRef
+		if err := rows.Scan(&ref.WingID, &ref.SessionID); err != nil {
+			return nil, fmt.Errorf("storage: scan orphaned verbatim session: %w", err)
+		}
+		refs = append(refs, ref)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("storage: iterate orphaned verbatim sessions: %w", err)
+	}
+	return refs, nil
+}
+
+
 // WingStats contains a wing's metadata and drawer counts.
 type WingStats struct {
 	ID            int64     `json:"id"`
