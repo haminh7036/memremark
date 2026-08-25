@@ -17,6 +17,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/haminh7036/memremark/internal/storage"
+	"github.com/haminh7036/memremark/internal/summarizer"
 )
 
 type stubInvoker struct {
@@ -24,7 +25,7 @@ type stubInvoker struct {
 	err   error
 }
 
-func (s stubInvoker) Invoke(ctx context.Context, prompt string) (string, error) {
+func (s stubInvoker) Invoke(ctx context.Context, prompt string, opts ...summarizer.InvokerOptions) (string, error) {
 	if s.err != nil {
 		return "", s.err
 	}
@@ -39,7 +40,7 @@ type flakyInvoker struct {
 	calls    int
 }
 
-func (f *flakyInvoker) Invoke(ctx context.Context, prompt string) (string, error) {
+func (f *flakyInvoker) Invoke(ctx context.Context, prompt string, opts ...summarizer.InvokerOptions) (string, error) {
 	f.calls++
 	if f.calls <= f.failures {
 		return "", fmt.Errorf("transient failure")

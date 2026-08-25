@@ -20,7 +20,7 @@ type recordingInvoker struct {
 	reply   string
 }
 
-func (r *recordingInvoker) Invoke(ctx context.Context, prompt string) (string, error) {
+func (r *recordingInvoker) Invoke(ctx context.Context, prompt string, opts ...summarizer.InvokerOptions) (string, error) {
 	r.batches = append(r.batches, nil) // placeholder; prompt itself isn't parsed back into observations
 	return r.reply, nil
 }

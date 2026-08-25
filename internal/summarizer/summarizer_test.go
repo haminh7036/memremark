@@ -19,7 +19,7 @@ type stubInvoker struct {
 	err   error
 }
 
-func (s stubInvoker) Invoke(ctx context.Context, prompt string) (string, error) {
+func (s stubInvoker) Invoke(ctx context.Context, prompt string, opts ...InvokerOptions) (string, error) {
 	return s.reply, s.err
 }
 
@@ -408,7 +408,7 @@ func TestClaudeCodeInvoker_BuildArgs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			args := tt.invoker.buildArgs()
+			args := tt.invoker.buildArgs("")
 			if len(args) != len(tt.wantArgs) {
 				t.Fatalf("got args %v, want %v", args, tt.wantArgs)
 			}
@@ -450,7 +450,7 @@ func TestAntigravityInvoker_BuildArgs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			args := tt.invoker.buildArgs(tt.prompt)
+			args := tt.invoker.buildArgs(tt.prompt, "")
 			if len(args) != len(tt.wantArgs) {
 				t.Fatalf("got args %v, want %v", args, tt.wantArgs)
 			}
@@ -473,5 +473,193 @@ func TestNopInvoker(t *testing.T) {
 		t.Fatalf("unexpected error message: %v", err)
 	}
 }
+
+func TestClaudeCodeInvoker_BuildArgs_WithSessionID(t *testing.T) {
+	inv := ClaudeCodeInvoker{Model: "haiku"}
+	args := inv.buildArgs("sess-uuid-1234")
+	hasSessionFlag := false
+	for i, a := range args {
+		if a == "--session-id" && i+1 < len(args) && args[i+1] == "sess-uuid-1234" {
+			hasSessionFlag = true
+			break
+		}
+	}
+	if !hasSessionFlag {
+		t.Fatalf("expected --session-id sess-uuid-1234 in args, got: %v", args)
+	}
+}
+
+func TestAntigravityInvoker_BuildArgs_WithConversationID(t *testing.T) {
+	inv := AntigravityInvoker{Model: "gemini-3.7-flash-low", Effort: "low"}
+	args := inv.buildArgs("test prompt", "conv-uuid-5678")
+	hasConvFlag := false
+	for i, a := range args {
+		if a == "--conversation" && i+1 < len(args) && args[i+1] == "conv-uuid-5678" {
+			hasConvFlag = true
+			break
+		}
+	}
+	if !hasConvFlag {
+		t.Fatalf("expected --conversation conv-uuid-5678 in args, got: %v", args)
+	}
+}
+
+func TestClaudeCodeInvoker_Invoke_WithOptions(t *testing.T) {
+	dir := t.TempDir()
+	workDir := filepath.Join(dir, "myproject")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	argvFile := filepath.Join(dir, "argv.txt")
+	pwdFile := filepath.Join(dir, "pwd.txt")
+	fakeClaude := filepath.Join(dir, "claude")
+
+	script := "#!/bin/sh\n" +
+		"printf '%s' \"$*\" > " + argvFile + "\n" +
+		"pwd > " + pwdFile + "\n" +
+		`echo '{"result":"scoped-ok","is_error":false}'` + "\n"
+	if err := os.WriteFile(fakeClaude, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake claude: %v", err)
+	}
+
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	opts := InvokerOptions{
+		SessionID: "sess-claude-999",
+		WorkDir:   workDir,
+	}
+	res, err := ClaudeCodeInvoker{}.Invoke(context.Background(), "test prompt", opts)
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+	if res != "scoped-ok" {
+		t.Fatalf("unexpected result: %q", res)
+	}
+
+	argvBytes, err := os.ReadFile(argvFile)
+	if err != nil {
+		t.Fatalf("read argv: %v", err)
+	}
+	if !strings.Contains(string(argvBytes), "--session-id sess-claude-999") {
+		t.Fatalf("expected --session-id in argv, got %s", string(argvBytes))
+	}
+
+	pwdBytes, err := os.ReadFile(pwdFile)
+	if err != nil {
+		t.Fatalf("read pwd: %v", err)
+	}
+	if strings.TrimSpace(string(pwdBytes)) != workDir {
+		t.Fatalf("expected pwd %q, got %q", workDir, strings.TrimSpace(string(pwdBytes)))
+	}
+}
+
+func TestAntigravityInvoker_Invoke_WithOptions(t *testing.T) {
+	dir := t.TempDir()
+	workDir := filepath.Join(dir, "myproject")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	argvFile := filepath.Join(dir, "argv.txt")
+	pwdFile := filepath.Join(dir, "pwd.txt")
+	fakeAgy := filepath.Join(dir, "agy")
+
+	script := "#!/bin/sh\n" +
+		"printf '%s' \"$*\" > " + argvFile + "\n" +
+		"pwd > " + pwdFile + "\n" +
+		`echo '{"status":"SUCCESS","response":"scoped-agy-ok"}'` + "\n"
+	if err := os.WriteFile(fakeAgy, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake agy: %v", err)
+	}
+
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	opts := InvokerOptions{
+		SessionID: "conv-agy-888",
+		WorkDir:   workDir,
+	}
+	res, err := AntigravityInvoker{}.Invoke(context.Background(), "test prompt", opts)
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+	if res != "scoped-agy-ok" {
+		t.Fatalf("unexpected result: %q", res)
+	}
+
+	argvBytes, err := os.ReadFile(argvFile)
+	if err != nil {
+		t.Fatalf("read argv: %v", err)
+	}
+	if !strings.Contains(string(argvBytes), "--conversation conv-agy-888") {
+		t.Fatalf("expected --conversation in argv, got %s", string(argvBytes))
+	}
+
+	pwdBytes, err := os.ReadFile(pwdFile)
+	if err != nil {
+		t.Fatalf("read pwd: %v", err)
+	}
+	if strings.TrimSpace(string(pwdBytes)) != workDir {
+		t.Fatalf("expected pwd %q, got %q", workDir, strings.TrimSpace(string(pwdBytes)))
+	}
+}
+
+type optionsRecordingInvoker struct {
+	recordedOpts []InvokerOptions
+	reply        string
+	err          error
+}
+
+func (o *optionsRecordingInvoker) Invoke(ctx context.Context, prompt string, opts ...InvokerOptions) (string, error) {
+	o.recordedOpts = append(o.recordedOpts, opts...)
+	return o.reply, o.err
+}
+
+func TestSummarizeWithOptions_ForwardsOptions(t *testing.T) {
+	stub := &optionsRecordingInvoker{
+		reply: `[{"hall":"fact","content":"options forwarded"}]`,
+	}
+	obs := []observation.Observation{{ToolName: "Bash", Content: "echo 1"}}
+	opts := InvokerOptions{SessionID: "sess-123", WorkDir: "/path/to/project"}
+
+	items, err := SummarizeWithOptions(context.Background(), stub, obs, locale.TargetLanguage{Code: "en", Name: "English"}, opts)
+	if err != nil {
+		t.Fatalf("SummarizeWithOptions: %v", err)
+	}
+	if len(items) != 1 || items[0].Content != "options forwarded" {
+		t.Fatalf("unexpected items: %+v", items)
+	}
+	if len(stub.recordedOpts) != 1 {
+		t.Fatalf("expected 1 recorded option, got %d", len(stub.recordedOpts))
+	}
+	if stub.recordedOpts[0].SessionID != "sess-123" || stub.recordedOpts[0].WorkDir != "/path/to/project" {
+		t.Fatalf("unexpected recorded option: %+v", stub.recordedOpts[0])
+	}
+}
+
+func TestFallbackInvoker_ForwardsOptions(t *testing.T) {
+	primary := &optionsRecordingInvoker{err: errors.New("primary failed")}
+	fallback := &optionsRecordingInvoker{reply: `[{"hall":"fact","content":"ok"}]`}
+	fb := FallbackInvoker{
+		Primary:  primary,
+		Fallback: fallback,
+	}
+
+	opts := InvokerOptions{SessionID: "sess-fb", WorkDir: "/work/dir"}
+	res, err := fb.Invoke(context.Background(), "test prompt", opts)
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+	if res != `[{"hall":"fact","content":"ok"}]` {
+		t.Fatalf("unexpected reply: %q", res)
+	}
+	if len(primary.recordedOpts) != 1 || primary.recordedOpts[0].SessionID != "sess-fb" || primary.recordedOpts[0].WorkDir != "/work/dir" {
+		t.Fatalf("primary did not receive opts: %+v", primary.recordedOpts)
+	}
+	if len(fallback.recordedOpts) != 1 || fallback.recordedOpts[0].SessionID != "sess-fb" || fallback.recordedOpts[0].WorkDir != "/work/dir" {
+		t.Fatalf("fallback did not receive opts: %+v", fallback.recordedOpts)
+	}
+}
+
 
 

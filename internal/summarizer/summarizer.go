@@ -12,12 +12,19 @@ import (
 	"github.com/haminh7036/memremark/internal/storage"
 )
 
+// InvokerOptions configures invocation-specific parameters such as session scoping
+// and working directory.
+type InvokerOptions struct {
+	SessionID string
+	WorkDir   string
+}
+
 // Invoker runs one headless prompt through a CLI's own non-interactive
 // mode and returns the model's plain-text reply, already unwrapped from
 // that CLI's own JSON envelope. Concrete implementations shell out to
 // `claude -p` or `agy -p`; tests use a stub.
 type Invoker interface {
-	Invoke(ctx context.Context, prompt string) (string, error)
+	Invoke(ctx context.Context, prompt string, opts ...InvokerOptions) (string, error)
 }
 
 type claudeCodeResult struct {
@@ -30,8 +37,11 @@ type ClaudeCodeInvoker struct {
 	Model string
 }
 
-func (inv ClaudeCodeInvoker) buildArgs() []string {
+func (inv ClaudeCodeInvoker) buildArgs(sessionID string) []string {
 	args := []string{"-p", "--output-format", "json", "--safe-mode", "--tools", ""}
+	if sessionID != "" {
+		args = append(args, "--session-id", sessionID)
+	}
 	model := inv.Model
 	if model == "" {
 		model = "haiku"
@@ -50,8 +60,15 @@ func (inv ClaudeCodeInvoker) buildArgs() []string {
 // failed with "argument list too long" forever (nothing ever advanced the
 // retry cursor). `claude -p` (empirically verified) reads the prompt from
 // stdin when no positional prompt arg is given, which has no such limit.
-func (inv ClaudeCodeInvoker) Invoke(ctx context.Context, prompt string) (string, error) {
-	cmd := exec.CommandContext(ctx, "claude", inv.buildArgs()...)
+func (inv ClaudeCodeInvoker) Invoke(ctx context.Context, prompt string, opts ...InvokerOptions) (string, error) {
+	var opt InvokerOptions
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
+	cmd := exec.CommandContext(ctx, "claude", inv.buildArgs(opt.SessionID)...)
+	if opt.WorkDir != "" {
+		cmd.Dir = opt.WorkDir
+	}
 	cmd.Stdin = strings.NewReader(prompt)
 	out, err := cmd.Output()
 	if err != nil {
@@ -79,8 +96,11 @@ type AntigravityInvoker struct {
 	Effort string
 }
 
-func (inv AntigravityInvoker) buildArgs(prompt string) []string {
+func (inv AntigravityInvoker) buildArgs(prompt, sessionID string) []string {
 	args := []string{"-p", prompt, "--output-format", "json", "--disable-slash-commands"}
+	if sessionID != "" {
+		args = append(args, "--conversation", sessionID)
+	}
 	model := inv.Model
 	if model == "" {
 		model = "gemini-3.7-flash-low"
@@ -99,8 +119,15 @@ func (inv AntigravityInvoker) buildArgs(prompt string) []string {
 }
 
 // Invoke implements Invoker.
-func (inv AntigravityInvoker) Invoke(ctx context.Context, prompt string) (string, error) {
-	cmd := exec.CommandContext(ctx, "agy", inv.buildArgs(prompt)...)
+func (inv AntigravityInvoker) Invoke(ctx context.Context, prompt string, opts ...InvokerOptions) (string, error) {
+	var opt InvokerOptions
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
+	cmd := exec.CommandContext(ctx, "agy", inv.buildArgs(prompt, opt.SessionID)...)
+	if opt.WorkDir != "" {
+		cmd.Dir = opt.WorkDir
+	}
 	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("summarizer: agy -p failed: %w", err)
@@ -119,7 +146,7 @@ func (inv AntigravityInvoker) Invoke(ctx context.Context, prompt string) (string
 type NopInvoker struct{}
 
 // Invoke implements Invoker by returning a clear descriptive error.
-func (NopInvoker) Invoke(ctx context.Context, prompt string) (string, error) {
+func (NopInvoker) Invoke(ctx context.Context, prompt string, opts ...InvokerOptions) (string, error) {
 	return "", fmt.Errorf("summarizer: no active LLM CLI available in PATH")
 }
 
@@ -133,15 +160,15 @@ type FallbackInvoker struct {
 }
 
 // Invoke implements Invoker with automatic fallback.
-func (f FallbackInvoker) Invoke(ctx context.Context, prompt string) (string, error) {
+func (f FallbackInvoker) Invoke(ctx context.Context, prompt string, opts ...InvokerOptions) (string, error) {
 	if f.Primary == nil && f.Fallback == nil {
 		return "", fmt.Errorf("summarizer: no invokers configured in FallbackInvoker")
 	}
 	if f.Primary == nil {
-		return f.Fallback.Invoke(ctx, prompt)
+		return f.Fallback.Invoke(ctx, prompt, opts...)
 	}
 
-	res, err := f.Primary.Invoke(ctx, prompt)
+	res, err := f.Primary.Invoke(ctx, prompt, opts...)
 	if err == nil {
 		return res, nil
 	}
@@ -158,7 +185,7 @@ func (f FallbackInvoker) Invoke(ctx context.Context, prompt string) (string, err
 		f.OnFallback(err)
 	}
 
-	fallbackRes, fallbackErr := f.Fallback.Invoke(ctx, prompt)
+	fallbackRes, fallbackErr := f.Fallback.Invoke(ctx, prompt, opts...)
 	if fallbackErr != nil {
 		return "", fmt.Errorf("summarizer: primary failed (%w); fallback failed (%w)", err, fallbackErr)
 	}
@@ -173,22 +200,29 @@ type SummaryItem struct {
 	Content string `json:"content"`
 }
 
-// Summarize asks invoker to distill observations into hall-classified
-// SummaryItems using the target language. It returns (nil, nil) without
-// invoking anything if observations is empty.
-func Summarize(ctx context.Context, invoker Invoker, observations []observation.Observation, lang ...locale.TargetLanguage) ([]SummaryItem, error) {
+// SummarizeWithOptions asks invoker to distill observations into hall-classified
+// SummaryItems using the target language and invoker options. It returns (nil, nil)
+// without invoking anything if observations is empty.
+func SummarizeWithOptions(ctx context.Context, invoker Invoker, observations []observation.Observation, lang locale.TargetLanguage, opts ...InvokerOptions) ([]SummaryItem, error) {
 	if len(observations) == 0 {
 		return nil, nil
 	}
-	var targetLang locale.TargetLanguage
-	if len(lang) > 0 {
-		targetLang = lang[0]
-	}
-	text, err := invoker.Invoke(ctx, buildPrompt(observations, targetLang))
+	text, err := invoker.Invoke(ctx, buildPrompt(observations, lang), opts...)
 	if err != nil {
 		return nil, err
 	}
 	return parseSummaryItems(text)
+}
+
+// Summarize asks invoker to distill observations into hall-classified
+// SummaryItems using the target language. It returns (nil, nil) without
+// invoking anything if observations is empty.
+func Summarize(ctx context.Context, invoker Invoker, observations []observation.Observation, lang ...locale.TargetLanguage) ([]SummaryItem, error) {
+	var targetLang locale.TargetLanguage
+	if len(lang) > 0 {
+		targetLang = lang[0]
+	}
+	return SummarizeWithOptions(ctx, invoker, observations, targetLang)
 }
 
 func buildPrompt(observations []observation.Observation, lang locale.TargetLanguage) string {

@@ -19,7 +19,7 @@ import (
 // context's deadline).
 type blockingInvoker struct{}
 
-func (blockingInvoker) Invoke(ctx context.Context, prompt string) (string, error) {
+func (blockingInvoker) Invoke(ctx context.Context, prompt string, opts ...summarizer.InvokerOptions) (string, error) {
 	<-ctx.Done()
 	return "", ctx.Err()
 }
