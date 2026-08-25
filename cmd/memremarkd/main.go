@@ -52,10 +52,17 @@ func resolveInvokers(cfg config.Config, lookPath func(string) (string, error)) I
 	if hasClaude && hasAgy {
 		switch cfg.Summarizer.Provider {
 		case "antigravity":
+			invoker := summarizer.FallbackInvoker{
+				Primary:  antigravityPrimary,
+				Fallback: claudePrimary,
+				OnFallback: func(err error) {
+					log.Printf("memremarkd: antigravity summarizer failed (%v), falling back to claude", err)
+				},
+			}
 			return InvokerSetup{
-				ClaudeInvoker:      antigravityPrimary,
-				AntigravityInvoker: antigravityPrimary,
-				Summary:            "active invokers: agy only (provider configured)",
+				ClaudeInvoker:      invoker,
+				AntigravityInvoker: invoker,
+				Summary:            "active invokers: agy (primary, provider configured) + claude (fallback)",
 			}
 		case "claude":
 			invoker := summarizer.FallbackInvoker{
