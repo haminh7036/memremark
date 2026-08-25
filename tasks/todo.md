@@ -22,12 +22,12 @@ Acceptance:
   in the current process (simulating pre-restart backlog) still gets
   summarized + deleted after Warmup() + one PollOnce tick past idleWindow.
 
-[ ] Storage: add `Store.OrphanedVerbatimSessions() ([]SessionRef, error)`
+[x] Storage: add `Store.OrphanedVerbatimSessions() ([]SessionRef, error)`
     -- SELECT DISTINCT wing_id, session_id FROM drawers WHERE type='verbatim'
     -- SessionRef{WingID int64, SessionID string}
-[ ] Storage test: seed verbatim rows across 2 sessions (+1 summary-only
+[x] Storage test: seed verbatim rows across 2 sessions (+1 summary-only
     session that must NOT appear), assert exact distinct set returned
-[ ] Daemon: add `Daemon.Warmup() error`
+[x] Daemon: add `Daemon.Warmup() error`
     -- call Store.OrphanedVerbatimSessions()
     -- for each ref not already in d.sessionWing: set sessionWing,
        sessionInvoker = d.claudeInvoker, Tracker.Touch(sessionID, time.Unix(0,0))
@@ -35,15 +35,16 @@ Acceptance:
        regardless of idleWindow)
     -- skip refs already in sessionWing (don't clobber a live session's
        debounce clock)
-[ ] Daemon test: insert verbatim directly via Store (no recordObservation),
+[x] Daemon test: insert verbatim directly via Store (no recordObservation),
     construct fresh Daemon, call Warmup(), then PollOnce(now) once ->
     assert summary drawer created + verbatim rows for that session gone
-[ ] Daemon test: a session already Touch'd this process (live/active) is
+[x] Daemon test: a session already Touch'd this process (live/active) is
     left untouched by Warmup (its lastSeen isn't reset to epoch)
-[ ] Wire up: cmd/memremarkd/main.go calls d.Warmup() once right after
+[x] Wire up: cmd/memremarkd/main.go calls d.Warmup() once right after
     daemon.New(...), before the ticker loop; log recovered session count
-[ ] go build ./... && go test ./... green
+[x] go build ./... && go test ./... green
 [ ] Manual verify: run against real ~/.memremark/memremark.db copy (or
     the real one, since deletes only fire after successful summarize) and
     confirm verbatim MB drops on next daemon start+poll
-[ ] Summary: what changed + how verified
+[x] Summary: what changed + how verified
+
