@@ -15,6 +15,12 @@
     "summarizer": {
       "type": "object",
       "properties": {
+        "provider": {
+          "type": "string",
+          "enum": ["auto", "antigravity", "claude"],
+          "description": "Preferred summarizer CLI provider ('auto', 'antigravity', or 'claude').",
+          "default": "auto"
+        },
         "claude_model": {
           "type": "string",
           "description": "Claude Code model (e.g. 'haiku', 'claude-3-5-sonnet', 'default').",
