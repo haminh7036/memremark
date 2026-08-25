@@ -52,17 +52,10 @@ func resolveInvokers(cfg config.Config, lookPath func(string) (string, error)) I
 	if hasClaude && hasAgy {
 		switch cfg.Summarizer.Provider {
 		case "antigravity":
-			invoker := summarizer.FallbackInvoker{
-				Primary:  antigravityPrimary,
-				Fallback: claudePrimary,
-				OnFallback: func(err error) {
-					log.Printf("memremarkd: antigravity summarizer failed (%v), falling back to claude", err)
-				},
-			}
 			return InvokerSetup{
-				ClaudeInvoker:      invoker,
-				AntigravityInvoker: invoker,
-				Summary:            "active invokers: agy (primary, provider configured) + claude (fallback)",
+				ClaudeInvoker:      antigravityPrimary,
+				AntigravityInvoker: antigravityPrimary,
+				Summary:            "active invokers: agy only (provider configured)",
 			}
 		case "claude":
 			invoker := summarizer.FallbackInvoker{
@@ -133,14 +126,25 @@ func main() {
 		cfg = config.DefaultConfig()
 	}
 
-	store, err := storage.Open(filepath.Join(home, ".memremark", "memremark.db"))
+	dbPath := os.Getenv("MEMREMARK_DB")
+	if dbPath == "" {
+		dbPath = filepath.Join(home, ".memremark", "memremark.db")
+	}
+
+	store, err := storage.Open(dbPath)
 	if err != nil {
 		log.Fatalf("memremarkd: open storage: %v", err)
 	}
 	defer store.Close()
 
-	claudeProjectsRoot := filepath.Join(home, ".claude", "projects")
-	antigravitySummariesDB := filepath.Join(home, ".gemini", "antigravity-cli", "conversation_summaries.db")
+	claudeProjectsRoot := os.Getenv("MEMREMARK_CLAUDE_PROJECTS")
+	if claudeProjectsRoot == "" {
+		claudeProjectsRoot = filepath.Join(home, ".claude", "projects")
+	}
+	antigravitySummariesDB := os.Getenv("MEMREMARK_ANTIGRAVITY_DB")
+	if antigravitySummariesDB == "" {
+		antigravitySummariesDB = filepath.Join(home, ".gemini", "antigravity-cli", "conversation_summaries.db")
+	}
 
 	targetLang := locale.DetectLanguage(cfg.Language)
 	log.Printf("memremarkd: target locale '%s' (%s)", targetLang.Code, targetLang.Name)

@@ -1,11 +1,17 @@
 package summarizer
 
 import (
+	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+
+	_ "modernc.org/sqlite"
 
 	"github.com/haminh7036/memremark/internal/locale"
 	"github.com/haminh7036/memremark/internal/observation"
@@ -97,7 +103,7 @@ type AntigravityInvoker struct {
 }
 
 func (inv AntigravityInvoker) buildArgs(prompt, sessionID string) []string {
-	args := []string{"-p", prompt, "--output-format", "json", "--disable-slash-commands"}
+	args := []string{"--output-format", "json", "--disable-slash-commands"}
 	if sessionID != "" {
 		args = append(args, "--conversation", sessionID)
 	}
@@ -115,6 +121,7 @@ func (inv AntigravityInvoker) buildArgs(prompt, sessionID string) []string {
 	if effort != "default" && effort != "none" {
 		args = append(args, "--effort", effort)
 	}
+	args = append(args, "-p", prompt)
 	return args
 }
 
@@ -124,22 +131,63 @@ func (inv AntigravityInvoker) Invoke(ctx context.Context, prompt string, opts ..
 	if len(opts) > 0 {
 		opt = opts[0]
 	}
+	if opt.SessionID != "" {
+		ensureAntigravityConversationFile(opt.SessionID)
+	}
 	cmd := exec.CommandContext(ctx, "agy", inv.buildArgs(prompt, opt.SessionID)...)
 	if opt.WorkDir != "" {
 		cmd.Dir = opt.WorkDir
 	}
-	out, err := cmd.Output()
+	tmpFile, err := os.CreateTemp("", "memremark-agy-out-*.json")
+	if err != nil {
+		return "", fmt.Errorf("summarizer: create temp stdout file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath)
+
+	cmd.Stdout = tmpFile
+	err = cmd.Run()
+	_ = tmpFile.Close()
 	if err != nil {
 		return "", fmt.Errorf("summarizer: agy -p failed: %w", err)
 	}
+
+	out, err := os.ReadFile(tmpPath)
+	if err != nil {
+		return "", fmt.Errorf("summarizer: read agy -p output: %w", err)
+	}
+
+	trimmed := bytes.TrimSpace(out)
+	if idx := bytes.IndexByte(trimmed, '{'); idx >= 0 {
+		trimmed = trimmed[idx:]
+	}
 	var res antigravityResult
-	if err := json.Unmarshal(out, &res); err != nil {
+	if err := json.Unmarshal(trimmed, &res); err != nil {
 		return "", fmt.Errorf("summarizer: parse agy -p output: %w", err)
 	}
 	if res.Status != "SUCCESS" {
 		return "", fmt.Errorf("summarizer: agy -p returned status %q: %s", res.Status, res.Error)
 	}
 	return res.Response, nil
+}
+
+func ensureAntigravityConversationFile(sessionID string) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	convDir := filepath.Join(home, ".gemini", "antigravity-cli", "conversations")
+	if err := os.MkdirAll(convDir, 0o755); err != nil {
+		return
+	}
+	dbPath := filepath.Join(convDir, sessionID+".db")
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		db, err := sql.Open("sqlite", dbPath)
+		if err == nil {
+			_, _ = db.Exec("CREATE TABLE IF NOT EXISTS steps (idx integer, step_payload blob);")
+			_ = db.Close()
+		}
+	}
 }
 
 // NopInvoker is a no-op invoker used when no supported LLM CLI is available in PATH.

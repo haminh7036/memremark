@@ -432,19 +432,19 @@ func TestAntigravityInvoker_BuildArgs(t *testing.T) {
 			name:     "default empty uses default model and low effort",
 			invoker:  AntigravityInvoker{},
 			prompt:   "test prompt",
-			wantArgs: []string{"-p", "test prompt", "--output-format", "json", "--disable-slash-commands", "--model", "gemini-3.7-flash-low", "--effort", "low"},
+			wantArgs: []string{"--output-format", "json", "--disable-slash-commands", "--model", "gemini-3.7-flash-low", "--effort", "low", "-p", "test prompt"},
 		},
 		{
 			name:     "custom model and effort",
 			invoker:  AntigravityInvoker{Model: "gemini-3.5-flash-low", Effort: "medium"},
 			prompt:   "test prompt",
-			wantArgs: []string{"-p", "test prompt", "--output-format", "json", "--disable-slash-commands", "--model", "gemini-3.5-flash-low", "--effort", "medium"},
+			wantArgs: []string{"--output-format", "json", "--disable-slash-commands", "--model", "gemini-3.5-flash-low", "--effort", "medium", "-p", "test prompt"},
 		},
 		{
 			name:     "keyword 'default' omits model and effort",
 			invoker:  AntigravityInvoker{Model: "default", Effort: "default"},
 			prompt:   "test prompt",
-			wantArgs: []string{"-p", "test prompt", "--output-format", "json", "--disable-slash-commands"},
+			wantArgs: []string{"--output-format", "json", "--disable-slash-commands", "-p", "test prompt"},
 		},
 	}
 

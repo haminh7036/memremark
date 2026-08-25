@@ -235,26 +235,11 @@ func TestResolveInvokers_ProviderPreference(t *testing.T) {
 	// Provider: "antigravity"
 	cfg.Summarizer.Provider = "antigravity"
 	setupAgy := resolveInvokers(cfg, mockLookPathAll)
-	fallbackAgyClaude, ok := setupAgy.ClaudeInvoker.(summarizer.FallbackInvoker)
-	if !ok {
-		t.Fatalf("expected FallbackInvoker for ClaudeInvoker under antigravity provider, got %T", setupAgy.ClaudeInvoker)
+	if _, isAgy := setupAgy.ClaudeInvoker.(summarizer.AntigravityInvoker); !isAgy {
+		t.Fatalf("expected ClaudeInvoker to be AntigravityInvoker when provider=antigravity, got %T", setupAgy.ClaudeInvoker)
 	}
-	if _, isAgy := fallbackAgyClaude.Primary.(summarizer.AntigravityInvoker); !isAgy {
-		t.Fatalf("expected Primary to be AntigravityInvoker when provider=antigravity, got %T", fallbackAgyClaude.Primary)
-	}
-	if _, isClaude := fallbackAgyClaude.Fallback.(summarizer.ClaudeCodeInvoker); !isClaude {
-		t.Fatalf("expected Fallback to be ClaudeCodeInvoker when provider=antigravity, got %T", fallbackAgyClaude.Fallback)
-	}
-
-	fallbackAgyAgy, ok := setupAgy.AntigravityInvoker.(summarizer.FallbackInvoker)
-	if !ok {
-		t.Fatalf("expected FallbackInvoker for AntigravityInvoker under antigravity provider, got %T", setupAgy.AntigravityInvoker)
-	}
-	if _, isAgy := fallbackAgyAgy.Primary.(summarizer.AntigravityInvoker); !isAgy {
-		t.Fatalf("expected Primary to be AntigravityInvoker when provider=antigravity, got %T", fallbackAgyAgy.Primary)
-	}
-	if _, isClaude := fallbackAgyAgy.Fallback.(summarizer.ClaudeCodeInvoker); !isClaude {
-		t.Fatalf("expected Fallback to be ClaudeCodeInvoker when provider=antigravity, got %T", fallbackAgyAgy.Fallback)
+	if _, isAgy := setupAgy.AntigravityInvoker.(summarizer.AntigravityInvoker); !isAgy {
+		t.Fatalf("expected AntigravityInvoker to be AntigravityInvoker when provider=antigravity, got %T", setupAgy.AntigravityInvoker)
 	}
 
 	// Provider: "claude"
