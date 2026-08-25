@@ -50,22 +50,51 @@ func resolveInvokers(cfg config.Config, lookPath func(string) (string, error)) I
 	}
 
 	if hasClaude && hasAgy {
-		return InvokerSetup{
-			ClaudeInvoker: summarizer.FallbackInvoker{
-				Primary:  claudePrimary,
-				Fallback: antigravityPrimary,
-				OnFallback: func(err error) {
-					log.Printf("memremarkd: claude summarizer failed (%v), falling back to antigravity", err)
-				},
-			},
-			AntigravityInvoker: summarizer.FallbackInvoker{
+		switch cfg.Summarizer.Provider {
+		case "antigravity":
+			invoker := summarizer.FallbackInvoker{
 				Primary:  antigravityPrimary,
 				Fallback: claudePrimary,
 				OnFallback: func(err error) {
 					log.Printf("memremarkd: antigravity summarizer failed (%v), falling back to claude", err)
 				},
-			},
-			Summary: "active invokers: claude (primary/fallback) + agy (primary/fallback)",
+			}
+			return InvokerSetup{
+				ClaudeInvoker:      invoker,
+				AntigravityInvoker: invoker,
+				Summary:            "active invokers: agy (primary, provider configured) + claude (fallback)",
+			}
+		case "claude":
+			invoker := summarizer.FallbackInvoker{
+				Primary:  claudePrimary,
+				Fallback: antigravityPrimary,
+				OnFallback: func(err error) {
+					log.Printf("memremarkd: claude summarizer failed (%v), falling back to antigravity", err)
+				},
+			}
+			return InvokerSetup{
+				ClaudeInvoker:      invoker,
+				AntigravityInvoker: invoker,
+				Summary:            "active invokers: claude (primary, provider configured) + agy (fallback)",
+			}
+		default:
+			return InvokerSetup{
+				ClaudeInvoker: summarizer.FallbackInvoker{
+					Primary:  claudePrimary,
+					Fallback: antigravityPrimary,
+					OnFallback: func(err error) {
+						log.Printf("memremarkd: claude summarizer failed (%v), falling back to antigravity", err)
+					},
+				},
+				AntigravityInvoker: summarizer.FallbackInvoker{
+					Primary:  antigravityPrimary,
+					Fallback: claudePrimary,
+					OnFallback: func(err error) {
+						log.Printf("memremarkd: antigravity summarizer failed (%v), falling back to claude", err)
+					},
+				},
+				Summary: "active invokers: claude (primary/fallback) + agy (primary/fallback)",
+			}
 		}
 	}
 

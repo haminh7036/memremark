@@ -71,6 +71,16 @@ func (d *Daemon) summarizeSessionWithBatchSize(ctx context.Context, sessionID st
 		return err
 	}
 
+	var opts summarizer.InvokerOptions
+	if d.Store != nil {
+		if wing, err := d.Store.GetWingByID(wingID); err == nil && wing != nil {
+			opts = summarizer.InvokerOptions{
+				SessionID: storage.WingSummarySessionID(wing.Path),
+				WorkDir:   wing.Path,
+			}
+		}
+	}
+
 	pruned := false
 	for len(verbatim) > 0 {
 		batch := takeBatch(verbatim, maxBatchBytes)
@@ -81,7 +91,7 @@ func (d *Daemon) summarizeSessionWithBatchSize(ctx context.Context, sessionID st
 			obs = append(obs, observation.Observation{ToolName: v.ToolName, Content: v.Content})
 		}
 
-		items, err := summarizer.Summarize(ctx, invoker, obs, d.TargetLanguage)
+		items, err := summarizer.SummarizeWithOptions(ctx, invoker, obs, d.TargetLanguage, opts)
 		if err != nil {
 			return err
 		}

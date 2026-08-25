@@ -17,11 +17,15 @@ import (
 // summarize, so tests can assert on how the caller chunked its input.
 type recordingInvoker struct {
 	batches [][]observation.Observation
+	opts    []summarizer.InvokerOptions
 	reply   string
 }
 
 func (r *recordingInvoker) Invoke(ctx context.Context, prompt string, opts ...summarizer.InvokerOptions) (string, error) {
 	r.batches = append(r.batches, nil) // placeholder; prompt itself isn't parsed back into observations
+	if len(opts) > 0 {
+		r.opts = append(r.opts, opts[0])
+	}
 	return r.reply, nil
 }
 
@@ -364,6 +368,46 @@ func TestDaemon_Warmup_DoesNotClobberLiveSessionDebounceClock(t *testing.T) {
 	}
 	if len(remaining) != 1 {
 		t.Fatalf("expected the live session's verbatim row to survive (not due yet), %d row(s) remain", len(remaining))
+	}
+}
+
+func TestDaemon_SummarizeSession_PassesDeterministicSessionIDAndWorkDir(t *testing.T) {
+	store, err := storage.Open(tempDBPath(t))
+	if err != nil {
+		t.Fatalf("storage.Open: %v", err)
+	}
+	defer store.Close()
+
+	projectPath := "/tmp/test-project-deterministic"
+	wingID, err := store.GetOrCreateWing(projectPath)
+	if err != nil {
+		t.Fatalf("GetOrCreateWing: %v", err)
+	}
+
+	now := time.Now()
+	if err := store.InsertVerbatimDrawer(wingID, "sess-det-1", "Bash", "git status", now); err != nil {
+		t.Fatalf("InsertVerbatimDrawer: %v", err)
+	}
+
+	invoker := &recordingInvoker{reply: `[{"hall":"fact","content":"summarized"}]`}
+	d := New(store, t.TempDir(), t.TempDir()+"/conversation_summaries.db", invoker, invoker)
+	d.sessionWing["sess-det-1"] = wingID
+	d.sessionInvoker["sess-det-1"] = invoker
+
+	if err := d.summarizeSession(context.Background(), "sess-det-1", now); err != nil {
+		t.Fatalf("summarizeSession: %v", err)
+	}
+
+	if len(invoker.opts) != 1 {
+		t.Fatalf("expected 1 opts recorded, got %d", len(invoker.opts))
+	}
+
+	expectedSessionID := storage.WingSummarySessionID(projectPath)
+	if invoker.opts[0].SessionID != expectedSessionID {
+		t.Errorf("expected SessionID %q, got %q", expectedSessionID, invoker.opts[0].SessionID)
+	}
+	if invoker.opts[0].WorkDir != projectPath {
+		t.Errorf("expected WorkDir %q, got %q", projectPath, invoker.opts[0].WorkDir)
 	}
 }
 

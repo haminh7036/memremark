@@ -225,3 +225,86 @@ func TestResolveInvokers_Matrix(t *testing.T) {
 	}
 }
 
+func TestResolveInvokers_ProviderPreference(t *testing.T) {
+	mockLookPathAll := func(cmd string) (string, error) {
+		return "/bin/" + cmd, nil
+	}
+
+	cfg := config.DefaultConfig()
+
+	// Provider: "antigravity"
+	cfg.Summarizer.Provider = "antigravity"
+	setupAgy := resolveInvokers(cfg, mockLookPathAll)
+	fallbackAgyClaude, ok := setupAgy.ClaudeInvoker.(summarizer.FallbackInvoker)
+	if !ok {
+		t.Fatalf("expected FallbackInvoker for ClaudeInvoker under antigravity provider, got %T", setupAgy.ClaudeInvoker)
+	}
+	if _, isAgy := fallbackAgyClaude.Primary.(summarizer.AntigravityInvoker); !isAgy {
+		t.Fatalf("expected Primary to be AntigravityInvoker when provider=antigravity, got %T", fallbackAgyClaude.Primary)
+	}
+	if _, isClaude := fallbackAgyClaude.Fallback.(summarizer.ClaudeCodeInvoker); !isClaude {
+		t.Fatalf("expected Fallback to be ClaudeCodeInvoker when provider=antigravity, got %T", fallbackAgyClaude.Fallback)
+	}
+
+	fallbackAgyAgy, ok := setupAgy.AntigravityInvoker.(summarizer.FallbackInvoker)
+	if !ok {
+		t.Fatalf("expected FallbackInvoker for AntigravityInvoker under antigravity provider, got %T", setupAgy.AntigravityInvoker)
+	}
+	if _, isAgy := fallbackAgyAgy.Primary.(summarizer.AntigravityInvoker); !isAgy {
+		t.Fatalf("expected Primary to be AntigravityInvoker when provider=antigravity, got %T", fallbackAgyAgy.Primary)
+	}
+	if _, isClaude := fallbackAgyAgy.Fallback.(summarizer.ClaudeCodeInvoker); !isClaude {
+		t.Fatalf("expected Fallback to be ClaudeCodeInvoker when provider=antigravity, got %T", fallbackAgyAgy.Fallback)
+	}
+
+	// Provider: "claude"
+	cfg.Summarizer.Provider = "claude"
+	setupClaude := resolveInvokers(cfg, mockLookPathAll)
+	fallbackClaudeClaude, ok := setupClaude.ClaudeInvoker.(summarizer.FallbackInvoker)
+	if !ok {
+		t.Fatalf("expected FallbackInvoker for ClaudeInvoker under claude provider, got %T", setupClaude.ClaudeInvoker)
+	}
+	if _, isClaude := fallbackClaudeClaude.Primary.(summarizer.ClaudeCodeInvoker); !isClaude {
+		t.Fatalf("expected Primary to be ClaudeCodeInvoker when provider=claude, got %T", fallbackClaudeClaude.Primary)
+	}
+	if _, isAgy := fallbackClaudeClaude.Fallback.(summarizer.AntigravityInvoker); !isAgy {
+		t.Fatalf("expected Fallback to be AntigravityInvoker when provider=claude, got %T", fallbackClaudeClaude.Fallback)
+	}
+
+	fallbackClaudeAgy, ok := setupClaude.AntigravityInvoker.(summarizer.FallbackInvoker)
+	if !ok {
+		t.Fatalf("expected FallbackInvoker for AntigravityInvoker under claude provider, got %T", setupClaude.AntigravityInvoker)
+	}
+	if _, isClaude := fallbackClaudeAgy.Primary.(summarizer.ClaudeCodeInvoker); !isClaude {
+		t.Fatalf("expected Primary to be ClaudeCodeInvoker when provider=claude, got %T", fallbackClaudeAgy.Primary)
+	}
+	if _, isAgy := fallbackClaudeAgy.Fallback.(summarizer.AntigravityInvoker); !isAgy {
+		t.Fatalf("expected Fallback to be AntigravityInvoker when provider=claude, got %T", fallbackClaudeAgy.Fallback)
+	}
+
+	// Provider: "auto"
+	cfg.Summarizer.Provider = "auto"
+	setupAuto := resolveInvokers(cfg, mockLookPathAll)
+	fbClaudeAuto, ok := setupAuto.ClaudeInvoker.(summarizer.FallbackInvoker)
+	if !ok {
+		t.Fatalf("expected FallbackInvoker for ClaudeInvoker under auto provider")
+	}
+	if _, isClaude := fbClaudeAuto.Primary.(summarizer.ClaudeCodeInvoker); !isClaude {
+		t.Fatalf("expected ClaudeInvoker.Primary to be ClaudeCodeInvoker under auto, got %T", fbClaudeAuto.Primary)
+	}
+	if _, isAgy := fbClaudeAuto.Fallback.(summarizer.AntigravityInvoker); !isAgy {
+		t.Fatalf("expected ClaudeInvoker.Fallback to be AntigravityInvoker under auto, got %T", fbClaudeAuto.Fallback)
+	}
+
+	fbAgyAuto, ok := setupAuto.AntigravityInvoker.(summarizer.FallbackInvoker)
+	if !ok {
+		t.Fatalf("expected FallbackInvoker for AntigravityInvoker under auto provider")
+	}
+	if _, isAgy := fbAgyAuto.Primary.(summarizer.AntigravityInvoker); !isAgy {
+		t.Fatalf("expected AntigravityInvoker.Primary to be AntigravityInvoker under auto, got %T", fbAgyAuto.Primary)
+	}
+	if _, isClaude := fbAgyAuto.Fallback.(summarizer.ClaudeCodeInvoker); !isClaude {
+		t.Fatalf("expected AntigravityInvoker.Fallback to be ClaudeCodeInvoker under auto, got %T", fbAgyAuto.Fallback)
+	}
+}
+
