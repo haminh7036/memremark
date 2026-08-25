@@ -73,7 +73,9 @@ func (inv ClaudeCodeInvoker) Invoke(ctx context.Context, prompt string, opts ...
 	}
 	cmd := exec.CommandContext(ctx, "claude", inv.buildArgs(opt.SessionID)...)
 	if opt.WorkDir != "" {
-		cmd.Dir = opt.WorkDir
+		if info, err := os.Stat(opt.WorkDir); err == nil && info.IsDir() {
+			cmd.Dir = opt.WorkDir
+		}
 	}
 	cmd.Stdin = strings.NewReader(prompt)
 	out, err := cmd.Output()
@@ -136,7 +138,9 @@ func (inv AntigravityInvoker) Invoke(ctx context.Context, prompt string, opts ..
 	}
 	cmd := exec.CommandContext(ctx, "agy", inv.buildArgs(prompt, opt.SessionID)...)
 	if opt.WorkDir != "" {
-		cmd.Dir = opt.WorkDir
+		if info, err := os.Stat(opt.WorkDir); err == nil && info.IsDir() {
+			cmd.Dir = opt.WorkDir
+		}
 	}
 	tmpFile, err := os.CreateTemp("", "memremark-agy-out-*.json")
 	if err != nil {

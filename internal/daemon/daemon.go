@@ -121,7 +121,13 @@ func (d *Daemon) PollOnce(ctx context.Context, now time.Time) error {
 		log.Printf("daemon: antigravity poll error: %v", err)
 	}
 	for _, sessionID := range d.Tracker.Due(now, idleWindow) {
+		if ctx.Err() != nil {
+			break
+		}
 		if err := d.summarizeSession(ctx, sessionID, now); err != nil {
+			if ctx.Err() != nil {
+				break
+			}
 			// Do NOT consume the session on failure -- leave it due so the
 			// very next poll tick retries it (a few seconds later, not a
 			// whole new idle window). Matches the watermark-on-error
