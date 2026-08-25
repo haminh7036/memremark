@@ -184,3 +184,42 @@ func TestMigrateLegacyWings(t *testing.T) {
 		t.Fatalf("expected drawer wing_id to be re-pointed to 2, got %d", drawerWingID)
 	}
 }
+
+func TestListWingsAndGetByID(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "memremark.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+
+	id1, err := s.GetOrCreateWing("/tmp/proj-a")
+	if err != nil {
+		t.Fatalf("GetOrCreateWing 1: %v", err)
+	}
+	id2, err := s.GetOrCreateWing("/tmp/proj-b")
+	if err != nil {
+		t.Fatalf("GetOrCreateWing 2: %v", err)
+	}
+
+	wings, err := s.ListWings()
+	if err != nil {
+		t.Fatalf("ListWings: %v", err)
+	}
+	if len(wings) != 2 {
+		t.Fatalf("expected 2 wings, got %d", len(wings))
+	}
+	if wings[0].ID != id1 || wings[0].Path != "/tmp/proj-a" {
+		t.Fatalf("unexpected wing 0: %+v", wings[0])
+	}
+	if wings[1].ID != id2 || wings[1].Path != "/tmp/proj-b" {
+		t.Fatalf("unexpected wing 1: %+v", wings[1])
+	}
+
+	w1, err := s.GetWingByID(id1)
+	if err != nil {
+		t.Fatalf("GetWingByID: %v", err)
+	}
+	if w1 == nil || w1.Path != "/tmp/proj-a" {
+		t.Fatalf("unexpected w1: %+v", w1)
+	}
+}

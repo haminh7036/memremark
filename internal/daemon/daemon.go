@@ -142,7 +142,7 @@ func (d *Daemon) isSummarySession(sessionID string) bool {
 	if d.Store == nil || sessionID == "" {
 		return false
 	}
-	wings, err := d.Store.ListWingsWithStats()
+	wings, err := d.Store.ListWings()
 	if err != nil {
 		log.Printf("daemon: isSummarySession: list wings: %v", err)
 		return false

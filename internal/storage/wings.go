@@ -91,3 +91,24 @@ func (s *Store) GetWingByID(id int64) (*Wing, error) {
 	w.CreatedAt = time.Unix(createdAt, 0)
 	return &w, nil
 }
+
+// ListWings returns all wings ordered by id ASC.
+func (s *Store) ListWings() ([]Wing, error) {
+	rows, err := s.db.Query(`SELECT id, path, name, created_at FROM wings ORDER BY id ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("storage: list wings: %w", err)
+	}
+	defer rows.Close()
+
+	var wings []Wing
+	for rows.Next() {
+		var w Wing
+		var createdAt int64
+		if err := rows.Scan(&w.ID, &w.Path, &w.Name, &createdAt); err != nil {
+			return nil, fmt.Errorf("storage: scan wing: %w", err)
+		}
+		w.CreatedAt = time.Unix(createdAt, 0)
+		wings = append(wings, w)
+	}
+	return wings, rows.Err()
+}
