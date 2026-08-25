@@ -671,4 +671,29 @@ func TestStore_OrphanedVerbatimSessions(t *testing.T) {
 	}
 }
 
+func TestStore_GetWingByID(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "memremark.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
 
+	id, err := s.GetOrCreateWing("/tmp/project-wing-test")
+	if err != nil {
+		t.Fatalf("GetOrCreateWing: %v", err)
+	}
+
+	wing, err := s.GetWingByID(id)
+	if err != nil {
+		t.Fatalf("GetWingByID: %v", err)
+	}
+	if wing.ID != id || wing.Path != "/tmp/project-wing-test" || wing.Name != "project-wing-test" {
+		t.Fatalf("unexpected wing retrieved: %+v", wing)
+	}
+
+	// Non-existent ID
+	missing, err := s.GetWingByID(999999)
+	if err == nil || missing != nil {
+		t.Fatalf("expected error for non-existent wing ID, got %v, err: %v", missing, err)
+	}
+}

@@ -70,3 +70,24 @@ func (s *Store) GetOrCreateWing(path string) (int64, error) {
 	}
 	return id, nil
 }
+
+// Wing represents a single project workspace.
+type Wing struct {
+	ID        int64     `json:"id"`
+	Path      string    `json:"path"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// GetWingByID returns the Wing matching id.
+func (s *Store) GetWingByID(id int64) (*Wing, error) {
+	var w Wing
+	var createdAt int64
+	err := s.db.QueryRow(`SELECT id, path, name, created_at FROM wings WHERE id = ?`, id).
+		Scan(&w.ID, &w.Path, &w.Name, &createdAt)
+	if err != nil {
+		return nil, fmt.Errorf("storage: get wing by id %d: %w", id, err)
+	}
+	w.CreatedAt = time.Unix(createdAt, 0)
+	return &w, nil
+}
