@@ -213,3 +213,39 @@ func TestConfig_UIInvalidPortEnv(t *testing.T) {
 	}
 }
 
+func TestConfig_SummarizerProvider(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.Summarizer.Provider != "auto" {
+		t.Errorf("expected default provider %q, got %q", "auto", cfg.Summarizer.Provider)
+	}
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.json")
+	jsonContent := `{
+		"summarizer": {
+			"provider": "antigravity"
+		}
+	}`
+	if err := os.WriteFile(configPath, []byte(jsonContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	loadedCfg, err := LoadFromFile(configPath)
+	if err != nil {
+		t.Fatalf("LoadFromFile failed: %v", err)
+	}
+	if loadedCfg.Summarizer.Provider != "antigravity" {
+		t.Errorf("expected loaded provider 'antigravity', got %q", loadedCfg.Summarizer.Provider)
+	}
+
+	t.Setenv("MEMREMARK_SUMMARIZER_PROVIDER", "claude")
+	envCfg, err := LoadFromFile(configPath)
+	if err != nil {
+		t.Fatalf("LoadFromFile with env failed: %v", err)
+	}
+	if envCfg.Summarizer.Provider != "claude" {
+		t.Errorf("expected env override 'claude', got %q", envCfg.Summarizer.Provider)
+	}
+}
+
+

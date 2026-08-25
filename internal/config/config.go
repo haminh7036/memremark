@@ -11,6 +11,7 @@ import (
 
 const (
 	DefaultLanguage          = "auto"
+	DefaultProvider          = "auto"
 	DefaultClaudeModel       = "haiku"
 	DefaultAntigravityModel  = "gemini-3.7-flash-low"
 	DefaultAntigravityEffort = "low"
@@ -20,6 +21,7 @@ const (
 
 // SummarizerConfig specifies model parameters for headless distillers.
 type SummarizerConfig struct {
+	Provider          string `json:"provider"`
 	ClaudeModel       string `json:"claude_model"`
 	AntigravityModel  string `json:"antigravity_model"`
 	AntigravityEffort string `json:"antigravity_effort"`
@@ -44,6 +46,7 @@ func DefaultConfig() Config {
 	return Config{
 		Language: DefaultLanguage,
 		Summarizer: SummarizerConfig{
+			Provider:          DefaultProvider,
 			ClaudeModel:       DefaultClaudeModel,
 			AntigravityModel:  DefaultAntigravityModel,
 			AntigravityEffort: DefaultAntigravityEffort,
@@ -79,6 +82,9 @@ func LoadFromFile(filePath string) (Config, error) {
 	// Environment variable overrides
 	if env := os.Getenv("MEMREMARK_LANGUAGE"); env != "" {
 		cfg.Language = env
+	}
+	if env := os.Getenv("MEMREMARK_SUMMARIZER_PROVIDER"); env != "" {
+		cfg.Summarizer.Provider = env
 	}
 	if env := os.Getenv("MEMREMARK_CLAUDE_MODEL"); env != "" {
 		cfg.Summarizer.ClaudeModel = env
