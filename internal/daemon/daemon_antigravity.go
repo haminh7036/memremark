@@ -45,6 +45,9 @@ func (d *Daemon) pollAntigravity(now time.Time) error {
 	}
 
 	for _, conv := range convs {
+		if d.isSummarySession(conv.ID) {
+			continue
+		}
 		cleanWingPath := antigravity.ExtractWorkspacePath(conv.WorkspaceURIs)
 		if cleanWingPath == "" {
 			continue

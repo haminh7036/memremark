@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"log"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/haminh7036/memremark/internal/adapter/claudecode"
@@ -22,6 +24,11 @@ func (d *Daemon) pollClaudeCode(now time.Time) error {
 		return err
 	}
 	for _, file := range files {
+		sessionID := strings.TrimSuffix(filepath.Base(file), ".jsonl")
+		if d.isSummarySession(sessionID) {
+			continue
+		}
+
 		parser, seen := d.claudeParsers[file]
 		if !seen {
 			parser = claudecode.NewParser()

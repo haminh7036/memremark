@@ -134,3 +134,24 @@ func (d *Daemon) PollOnce(ctx context.Context, now time.Time) error {
 	}
 	return nil
 }
+
+// isSummarySession checks whether sessionID matches the deterministic
+// summary session UUID for any known wing. Dedicated summarizer sessions
+// are excluded from observation polling to prevent feedback loops.
+func (d *Daemon) isSummarySession(sessionID string) bool {
+	if d.Store == nil || sessionID == "" {
+		return false
+	}
+	wings, err := d.Store.ListWingsWithStats()
+	if err != nil {
+		log.Printf("daemon: isSummarySession: list wings: %v", err)
+		return false
+	}
+	for _, w := range wings {
+		if storage.WingSummarySessionID(w.Path) == sessionID {
+			return true
+		}
+	}
+	return false
+}
+
