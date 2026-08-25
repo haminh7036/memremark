@@ -74,7 +74,44 @@ func New(store *storage.Store, claudeProjectsRoot, antigravitySummariesDB string
 	}
 }
 
+// Warmup seeds in-memory session tracking from any verbatim backlog left
+// over from a previous daemon process -- e.g. a session that went idle and
+// finished before the daemon restarted. Without this, such a session would
+// never produce a new observation to re-arm its debounce clock (transcript
+// byte-offsets ARE persisted across restarts in poll_state, so no new
+// lines means no new Touch), leaving its verbatim rows orphaned forever
+// even though summarizeSessionWithBatchSize's prune logic is correct.
+//
+// The recovered invoker always defaults to d.claudeInvoker: resolveInvokers
+// (cmd/memremarkd/main.go) constructs ClaudeInvoker and AntigravityInvoker
+// as either the same value (only one CLI installed) or each other's
+// FallbackInvoker.Fallback (both installed), so there is no configuration
+// where this default produces a session that fails to summarize.
+//
+// Call this once, right after New, before the poll loop starts. It is
+// idempotent and safe to call again later: sessions already known in
+// sessionWing are skipped so a live session's debounce clock is never
+// clobbered back to the epoch.
+func (d *Daemon) Warmup() error {
+	refs, err := d.Store.OrphanedVerbatimSessions()
+	if err != nil {
+		return err
+	}
+	for _, ref := range refs {
+		if _, tracked := d.sessionWing[ref.SessionID]; tracked {
+			continue
+		}
+		d.sessionWing[ref.SessionID] = ref.WingID
+		d.sessionInvoker[ref.SessionID] = d.claudeInvoker
+		// Epoch guarantees Due() fires on the very first check, regardless
+		// of idleWindow, since now.Sub(epoch) is always far past it.
+		d.Tracker.Touch(ref.SessionID, time.Unix(0, 0))
+	}
+	return nil
+}
+
 // PollOnce runs one capture pass over both CLIs' transcripts, then
+
 // triggers summarization for any session that has gone idle.
 func (d *Daemon) PollOnce(ctx context.Context, now time.Time) error {
 	if err := d.pollClaudeCode(now); err != nil {

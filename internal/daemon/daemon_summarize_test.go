@@ -258,3 +258,112 @@ func TestDaemon_SummarizeSession_FallbackIntegration(t *testing.T) {
 		t.Fatalf("expected 1 drawer with content 'fallback worked' in hall 'fact', got: %+v", drawers)
 	}
 }
+
+// TestDaemon_Warmup_RecoversOrphanedSessionAcrossRestart is the regression
+// test for the production incident: verbatim rows from a session that
+// finished before a daemon restart never got summarized/pruned, because
+// Tracker/sessionWing/sessionInvoker are in-memory only and only get
+// populated by recordObservation on NEW transcript activity -- which an
+// already-finished session will never produce again. Warmup() must recover
+// such sessions from the DB so the very next PollOnce tick prunes them.
+func TestDaemon_Warmup_RecoversOrphanedSessionAcrossRestart(t *testing.T) {
+	store, err := storage.Open(tempDBPath(t))
+	if err != nil {
+		t.Fatalf("storage.Open: %v", err)
+	}
+	defer store.Close()
+
+	wingID, err := store.GetOrCreateWing("/tmp/project")
+	if err != nil {
+		t.Fatalf("GetOrCreateWing: %v", err)
+	}
+
+	// Simulate verbatim left behind by a PREVIOUS daemon process: inserted
+	// directly via the store, with no recordObservation call in this
+	// process, so sessionWing/sessionInvoker/Tracker start out empty for it.
+	now := time.Now()
+	if err := store.InsertVerbatimDrawer(wingID, "sess-orphan", "Bash", "go test ./...", now.Add(-time.Hour)); err != nil {
+		t.Fatalf("InsertVerbatimDrawer: %v", err)
+	}
+
+	invoker := stubInvoker{reply: `[{"hall":"fact","content":"recovered"}]`}
+	d := New(store, t.TempDir(), t.TempDir()+"/conversation_summaries.db", invoker, invoker)
+
+	if err := d.Warmup(); err != nil {
+		t.Fatalf("Warmup: %v", err)
+	}
+
+	// One PollOnce tick, well past idleWindow, should now summarize + prune
+	// the recovered session even though this process never touched it.
+	if err := d.PollOnce(context.Background(), now); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+
+	remaining, err := store.VerbatimSince(wingID, "sess-orphan", time.Unix(0, 0))
+	if err != nil {
+		t.Fatalf("VerbatimSince: %v", err)
+	}
+	if len(remaining) != 0 {
+		t.Fatalf("expected orphaned verbatim to be pruned after Warmup+PollOnce, %d row(s) remain", len(remaining))
+	}
+
+	summaries, err := store.RecentSummaries(wingID, 10)
+	if err != nil {
+		t.Fatalf("RecentSummaries: %v", err)
+	}
+	if len(summaries) != 1 || summaries[0].Content != "recovered" {
+		t.Fatalf("expected the recovered session to be distilled, got: %+v", summaries)
+	}
+}
+
+// TestDaemon_Warmup_DoesNotClobberLiveSessionDebounceClock ensures Warmup
+// only seeds sessions it doesn't already know about -- it must never reset
+// an actively-tracked session's idle clock back to the epoch, which would
+// force-flush a still-in-progress conversation on the very next tick
+// instead of waiting for it to actually go idle.
+func TestDaemon_Warmup_DoesNotClobberLiveSessionDebounceClock(t *testing.T) {
+	store, err := storage.Open(tempDBPath(t))
+	if err != nil {
+		t.Fatalf("storage.Open: %v", err)
+	}
+	defer store.Close()
+
+	wingID, err := store.GetOrCreateWing("/tmp/project")
+	if err != nil {
+		t.Fatalf("GetOrCreateWing: %v", err)
+	}
+
+	now := time.Now()
+	if err := store.InsertVerbatimDrawer(wingID, "sess-live", "Bash", "still typing", now); err != nil {
+		t.Fatalf("InsertVerbatimDrawer: %v", err)
+	}
+
+	invoker := stubInvoker{reply: `[{"hall":"fact","content":"should not fire yet"}]`}
+	d := New(store, t.TempDir(), t.TempDir()+"/conversation_summaries.db", invoker, invoker)
+
+	// Simulate this process having JUST recorded an observation for
+	// sess-live (i.e. it's actively being tracked, mid-conversation).
+	d.sessionWing["sess-live"] = wingID
+	d.sessionInvoker["sess-live"] = invoker
+	d.Tracker.Touch("sess-live", now)
+
+	if err := d.Warmup(); err != nil {
+		t.Fatalf("Warmup: %v", err)
+	}
+
+	// Immediately after Warmup, at the same instant as the last Touch,
+	// sess-live must NOT be due yet -- Warmup must not have reset its
+	// debounce clock to the epoch.
+	if err := d.PollOnce(context.Background(), now); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+
+	remaining, err := store.VerbatimSince(wingID, "sess-live", time.Unix(0, 0))
+	if err != nil {
+		t.Fatalf("VerbatimSince: %v", err)
+	}
+	if len(remaining) != 1 {
+		t.Fatalf("expected the live session's verbatim row to survive (not due yet), %d row(s) remain", len(remaining))
+	}
+}
+
