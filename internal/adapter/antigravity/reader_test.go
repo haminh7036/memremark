@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 	"time"
 
@@ -310,3 +311,82 @@ func TestExtractWorkspacePath(t *testing.T) {
 		})
 	}
 }
+
+func TestDiscoverConversationDBs(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create simulated conversation databases and auxiliary files
+	_ = os.WriteFile(filepath.Join(tmpDir, "conv-1.db"), []byte("dummy"), 0o644)
+	_ = os.WriteFile(filepath.Join(tmpDir, "conv-2.db"), []byte("dummy"), 0o644)
+	_ = os.WriteFile(filepath.Join(tmpDir, "conv-1.db-wal"), []byte("wal"), 0o644)
+	_ = os.WriteFile(filepath.Join(tmpDir, "conv-1.db-shm"), []byte("shm"), 0o644)
+	_ = os.WriteFile(filepath.Join(tmpDir, "other.txt"), []byte("txt"), 0o644)
+	_ = os.MkdirAll(filepath.Join(tmpDir, "folder.db"), 0o755)
+
+	ids, err := DiscoverConversationDBs(tmpDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	sort.Strings(ids)
+	expected := []string{"conv-1", "conv-2"}
+	if len(ids) != len(expected) || ids[0] != expected[0] || ids[1] != expected[1] {
+		t.Fatalf("expected %v, got %v", expected, ids)
+	}
+
+	// Missing directory should return empty slice and no error
+	missingIDs, err := DiscoverConversationDBs(filepath.Join(tmpDir, "nonexistent"))
+	if err != nil {
+		t.Fatalf("unexpected error on missing dir: %v", err)
+	}
+	if len(missingIDs) != 0 {
+		t.Fatalf("expected 0 ids on missing dir, got %d", len(missingIDs))
+	}
+}
+
+func TestExtractWorkspacePathFromDB(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test-conv.db")
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	_, _ = db.Exec("CREATE TABLE steps (idx integer, step_payload blob);")
+
+	// Payload with encoded file:// URI
+	payload := buildProtobufPromptBlob("file:///home/user/myproject/code.go")
+	_, err = db.Exec("INSERT INTO steps (idx, step_payload) VALUES (0, ?);", payload)
+	db.Close()
+	if err != nil {
+		t.Fatalf("insert step: %v", err)
+	}
+
+	path := ExtractWorkspacePathFromDB(dbPath, []string{"/home/user/myproject"})
+	if path != "/home/user/myproject/code.go" && path != "/home/user/myproject" {
+		t.Errorf("unexpected extracted path: %q", path)
+	}
+
+	// Test fallback to known registered wings when no file:// URI is present
+	dbPath2 := filepath.Join(tmpDir, "test-conv2.db")
+	db2, err := sql.Open("sqlite", dbPath2)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	_, _ = db2.Exec("CREATE TABLE steps (idx integer, step_payload blob);")
+	payload2 := buildProtobufPromptBlob("Working on /home/user/otherproject/src")
+	_, _ = db2.Exec("INSERT INTO steps (idx, step_payload) VALUES (0, ?);", payload2)
+	db2.Close()
+
+	path2 := ExtractWorkspacePathFromDB(dbPath2, []string{"/home/user/otherproject", "/home/user/otherproject/src"})
+	if path2 != "/home/user/otherproject/src" {
+		t.Errorf("expected longest matching wing /home/user/otherproject/src, got %q", path2)
+	}
+
+	// Non-existent DB
+	pathMissing := ExtractWorkspacePathFromDB(filepath.Join(tmpDir, "nonexistent.db"), []string{"/some/path"})
+	if pathMissing != "" {
+		t.Errorf("expected empty string for missing db, got %q", pathMissing)
+	}
+}
+

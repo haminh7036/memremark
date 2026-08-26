@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -181,3 +182,89 @@ func ReadObservations(conversationDBPath, wingPath, sessionID string, at time.Ti
 	}
 	return obs, maxIdx, nil
 }
+
+// DiscoverConversationDBs scans the conversations directory for all *.db files
+// and returns a slice of conversation IDs (extracted from <id>.db filename).
+func DiscoverConversationDBs(conversationsDir string) ([]string, error) {
+	entries, err := os.ReadDir(conversationsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("antigravity: read conversations dir %s: %w", conversationsDir, err)
+	}
+
+	var ids []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if strings.HasSuffix(name, ".db") && !strings.HasSuffix(name, ".db-wal") && !strings.HasSuffix(name, ".db-shm") {
+			convID := strings.TrimSuffix(name, ".db")
+			if convID != "" {
+				ids = append(ids, convID)
+			}
+		}
+	}
+	return ids, nil
+}
+
+// ExtractWorkspacePathFromDB inspects early step payloads in a conversation SQLite database
+// to find a file:// URI or matches against a slice of known registered wing paths.
+func ExtractWorkspacePathFromDB(conversationDBPath string, knownWings []string) string {
+	db, err := openReadOnly(conversationDBPath)
+	if err != nil {
+		return ""
+	}
+	defer db.Close()
+
+	rows, err := db.Query(`SELECT step_payload FROM steps ORDER BY idx ASC LIMIT 10`)
+	if err != nil {
+		return ""
+	}
+	defer rows.Close()
+
+	var candidateStrings []string
+	for rows.Next() {
+		var payload []byte
+		if err := rows.Scan(&payload); err == nil && len(payload) > 0 {
+			strs := ExtractStrings(payload)
+			candidateStrings = append(candidateStrings, strs...)
+		}
+	}
+
+	// 1. First priority: look for explicit file:// URIs or ["file://..."]
+	for _, s := range candidateStrings {
+		if strings.Contains(s, "file://") {
+			if idx := strings.Index(s, "file://"); idx >= 0 {
+				rawURI := s[idx:]
+				if endIdx := strings.IndexAny(rawURI, " \t\r\n\"'"); endIdx > 0 {
+					rawURI = rawURI[:endIdx]
+				}
+				if cleaned := ExtractWorkspacePath(rawURI); cleaned != "" {
+					return cleaned
+				}
+			}
+		}
+	}
+
+	// 2. Second priority: match against known registered wings
+	var longestMatch string
+	for _, s := range candidateStrings {
+		for _, wing := range knownWings {
+			cleanWing := filepath.Clean(wing)
+			if cleanWing != "" && strings.Contains(s, cleanWing) {
+				if len(cleanWing) > len(longestMatch) {
+					longestMatch = cleanWing
+				}
+			}
+		}
+	}
+	if longestMatch != "" {
+		return longestMatch
+	}
+
+	return ""
+}
+
