@@ -25,7 +25,7 @@ MemRemark operates as an **Active Memory Palace**:
 ---
 
 ## Project Status & Roadmap
-- **Phase 1: Core Engine, MCP Server & Web Dashboard (Single Host)** — **`v0.1.6` (Complete & Tested)**
+- **Phase 1: Core Engine, MCP Server & Web Dashboard (Single Host)** — **`v0.1.7` (Complete & Tested)**
   - Transcript tailing & SQLite state capture for Claude Code and Antigravity CLI.
   - Headless background summarizer daemon with **Direct API Invokers (Gemini & Anthropic)**, **dynamic startup capability discovery**, and bidirectional auto-fallback.
   - **Zero-Overhead Memory Distillation**: Near 0MB RAM addition (vs ~1.2GB peak RSS with `agy -p`) and <1s latency when API keys are present.
