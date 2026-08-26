@@ -434,8 +434,8 @@ func main() {
 	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
 
-	log.Printf("memremarkd: started, polling every 3s (claude_model=%s, antigravity_model=%s, antigravity_effort=%s)",
-		cfg.Summarizer.ClaudeModel, cfg.Summarizer.AntigravityModel, cfg.Summarizer.AntigravityEffort)
+	log.Printf("memremarkd: started, polling every 3s (provider=%s, gemini_model=%s, anthropic_model=%s, claude_model=%s, antigravity_model=%s, antigravity_effort=%s)",
+		cfg.Summarizer.Provider, cfg.Summarizer.GeminiModel, cfg.Summarizer.AnthropicModel, cfg.Summarizer.ClaudeModel, cfg.Summarizer.AntigravityModel, cfg.Summarizer.AntigravityEffort)
 
 	for {
 		select {

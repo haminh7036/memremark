@@ -55,6 +55,8 @@ type anthropicResponse struct {
 	} `json:"error,omitempty"`
 }
 
+var defaultAnthropicHTTPClient = &http.Client{Timeout: 45 * time.Second}
+
 // Invoke calls Anthropic Messages API with output_config.format Structured Outputs.
 func (inv AnthropicAPIInvoker) Invoke(ctx context.Context, prompt string, opts ...InvokerOptions) (string, error) {
 	if inv.APIKey == "" {
@@ -115,7 +117,7 @@ func (inv AnthropicAPIInvoker) Invoke(ctx context.Context, prompt string, opts .
 
 	client := inv.HTTPClient
 	if client == nil {
-		client = &http.Client{Timeout: 45 * time.Second}
+		client = defaultAnthropicHTTPClient
 	}
 
 	resp, err := client.Do(req)

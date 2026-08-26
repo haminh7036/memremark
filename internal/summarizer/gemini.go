@@ -73,6 +73,8 @@ type geminiResponse struct {
 	} `json:"error,omitempty"`
 }
 
+var defaultGeminiHTTPClient = &http.Client{Timeout: 45 * time.Second}
+
 // Invoke calls the Gemini generateContent endpoint.
 func (inv GeminiAPIInvoker) Invoke(ctx context.Context, prompt string, opts ...InvokerOptions) (string, error) {
 	if inv.APIKey == "" {
@@ -129,7 +131,7 @@ func (inv GeminiAPIInvoker) Invoke(ctx context.Context, prompt string, opts ...I
 
 	client := inv.HTTPClient
 	if client == nil {
-		client = &http.Client{Timeout: 45 * time.Second}
+		client = defaultGeminiHTTPClient
 	}
 
 	resp, err := client.Do(req)
