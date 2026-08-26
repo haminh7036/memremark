@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -307,4 +308,168 @@ func TestResolveInvokers_ProviderPreference(t *testing.T) {
 		t.Fatalf("expected AntigravityInvoker.Fallback to be ClaudeCodeInvoker under auto, got %T", fbAgyAuto.Fallback)
 	}
 }
+
+func TestResolveInvokers_GeminiAPIKeyPriority(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Summarizer.GeminiAPIKey = "test-gemini-key"
+
+	lookPath := func(file string) (string, error) {
+		return "/usr/bin/" + file, nil
+	}
+
+	setup := resolveInvokers(cfg, lookPath)
+	fbClaude, ok := setup.ClaudeInvoker.(summarizer.FallbackInvoker)
+	if !ok {
+		t.Fatalf("expected FallbackInvoker for ClaudeInvoker, got %T", setup.ClaudeInvoker)
+	}
+	if _, ok := fbClaude.Primary.(summarizer.GeminiAPIInvoker); !ok {
+		t.Errorf("expected primary GeminiAPIInvoker for ClaudeInvoker, got %T", fbClaude.Primary)
+	}
+
+	fbAgy, ok := setup.AntigravityInvoker.(summarizer.FallbackInvoker)
+	if !ok {
+		t.Fatalf("expected FallbackInvoker for AntigravityInvoker, got %T", setup.AntigravityInvoker)
+	}
+	if _, ok := fbAgy.Primary.(summarizer.GeminiAPIInvoker); !ok {
+		t.Errorf("expected primary GeminiAPIInvoker for AntigravityInvoker, got %T", fbAgy.Primary)
+	}
+}
+
+func TestResolveInvokers_AnthropicAPIKeyPriority(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Summarizer.AnthropicAPIKey = "test-anthropic-key"
+
+	lookPath := func(file string) (string, error) {
+		return "/usr/bin/" + file, nil
+	}
+
+	setup := resolveInvokers(cfg, lookPath)
+	fbClaude, ok := setup.ClaudeInvoker.(summarizer.FallbackInvoker)
+	if !ok {
+		t.Fatalf("expected FallbackInvoker for ClaudeInvoker, got %T", setup.ClaudeInvoker)
+	}
+	if _, ok := fbClaude.Primary.(summarizer.AnthropicAPIInvoker); !ok {
+		t.Errorf("expected primary AnthropicAPIInvoker for ClaudeInvoker, got %T", fbClaude.Primary)
+	}
+
+	fbAgy, ok := setup.AntigravityInvoker.(summarizer.FallbackInvoker)
+	if !ok {
+		t.Fatalf("expected FallbackInvoker for AntigravityInvoker, got %T", setup.AntigravityInvoker)
+	}
+	if _, ok := fbAgy.Primary.(summarizer.AnthropicAPIInvoker); !ok {
+		t.Errorf("expected primary AnthropicAPIInvoker for AntigravityInvoker, got %T", fbAgy.Primary)
+	}
+}
+
+func TestResolveInvokers_BothAPIKeys_AutoProvider(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Summarizer.GeminiAPIKey = "test-gemini-key"
+	cfg.Summarizer.AnthropicAPIKey = "test-anthropic-key"
+
+	lookPath := func(file string) (string, error) {
+		return "/usr/bin/" + file, nil
+	}
+
+	setup := resolveInvokers(cfg, lookPath)
+	fbClaude, ok := setup.ClaudeInvoker.(summarizer.FallbackInvoker)
+	if !ok {
+		t.Fatalf("expected FallbackInvoker for ClaudeInvoker, got %T", setup.ClaudeInvoker)
+	}
+	if _, ok := fbClaude.Primary.(summarizer.GeminiAPIInvoker); !ok {
+		t.Errorf("expected primary GeminiAPIInvoker for ClaudeInvoker, got %T", fbClaude.Primary)
+	}
+	fbSecond, ok := fbClaude.Fallback.(summarizer.FallbackInvoker)
+	if !ok {
+		t.Fatalf("expected secondary FallbackInvoker, got %T", fbClaude.Fallback)
+	}
+	if _, ok := fbSecond.Primary.(summarizer.AnthropicAPIInvoker); !ok {
+		t.Errorf("expected secondary primary AnthropicAPIInvoker, got %T", fbSecond.Primary)
+	}
+}
+
+func TestResolveInvokers_ExplicitProvider_Gemini(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Summarizer.Provider = "gemini"
+	cfg.Summarizer.GeminiAPIKey = "key"
+
+	lookPath := func(file string) (string, error) {
+		return "", errors.New("not found")
+	}
+
+	setup := resolveInvokers(cfg, lookPath)
+	fb, ok := setup.ClaudeInvoker.(summarizer.FallbackInvoker)
+	if !ok {
+		t.Fatalf("expected FallbackInvoker, got %T", setup.ClaudeInvoker)
+	}
+	if _, ok := fb.Primary.(summarizer.GeminiAPIInvoker); !ok {
+		t.Errorf("expected primary GeminiAPIInvoker, got %T", fb.Primary)
+	}
+}
+
+func TestResolveInvokers_ExplicitProvider_Anthropic(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Summarizer.Provider = "anthropic"
+	cfg.Summarizer.AnthropicAPIKey = "key"
+
+	lookPath := func(file string) (string, error) {
+		return "", errors.New("not found")
+	}
+
+	setup := resolveInvokers(cfg, lookPath)
+	fb, ok := setup.ClaudeInvoker.(summarizer.FallbackInvoker)
+	if !ok {
+		t.Fatalf("expected FallbackInvoker, got %T", setup.ClaudeInvoker)
+	}
+	if _, ok := fb.Primary.(summarizer.AnthropicAPIInvoker); !ok {
+		t.Errorf("expected primary AnthropicAPIInvoker, got %T", fb.Primary)
+	}
+}
+
+func TestResolveInvokers_ExplicitProvider_AnthropicWithGeminiFallback(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Summarizer.Provider = "anthropic"
+	cfg.Summarizer.AnthropicAPIKey = "ant-key"
+	cfg.Summarizer.GeminiAPIKey = "gem-key"
+
+	lookPath := func(file string) (string, error) {
+		return "/usr/bin/" + file, nil
+	}
+
+	setup := resolveInvokers(cfg, lookPath)
+	fb, ok := setup.ClaudeInvoker.(summarizer.FallbackInvoker)
+	if !ok {
+		t.Fatalf("expected FallbackInvoker, got %T", setup.ClaudeInvoker)
+	}
+	if _, ok := fb.Primary.(summarizer.AnthropicAPIInvoker); !ok {
+		t.Errorf("expected primary AnthropicAPIInvoker, got %T", fb.Primary)
+	}
+	fbSecond, ok := fb.Fallback.(summarizer.FallbackInvoker)
+	if !ok {
+		t.Fatalf("expected secondary FallbackInvoker, got %T", fb.Fallback)
+	}
+	if _, ok := fbSecond.Primary.(summarizer.GeminiAPIInvoker); !ok {
+		t.Errorf("expected secondary primary GeminiAPIInvoker, got %T", fbSecond.Primary)
+	}
+}
+
+func TestResolveInvokers_ExplicitProvider_CLIOverridesAPIKeys(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Summarizer.Provider = "claude"
+	cfg.Summarizer.GeminiAPIKey = "gem-key"
+	cfg.Summarizer.AnthropicAPIKey = "ant-key"
+
+	lookPath := func(file string) (string, error) {
+		return "/usr/bin/" + file, nil
+	}
+
+	setup := resolveInvokers(cfg, lookPath)
+	fb, ok := setup.ClaudeInvoker.(summarizer.FallbackInvoker)
+	if !ok {
+		t.Fatalf("expected FallbackInvoker, got %T", setup.ClaudeInvoker)
+	}
+	if _, isClaude := fb.Primary.(summarizer.ClaudeCodeInvoker); !isClaude {
+		t.Errorf("expected primary ClaudeCodeInvoker when provider=claude even with API keys set, got %T", fb.Primary)
+	}
+}
+
 
