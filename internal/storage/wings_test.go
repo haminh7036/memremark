@@ -223,3 +223,49 @@ func TestListWingsAndGetByID(t *testing.T) {
 		t.Fatalf("unexpected w1: %+v", w1)
 	}
 }
+
+func TestListWingPaths(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "memremark.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+
+	_, err = s.GetOrCreateWing("/home/user/projectA")
+	if err != nil {
+		t.Fatalf("GetOrCreateWing A: %v", err)
+	}
+	_, err = s.GetOrCreateWing("/home/user/projectB")
+	if err != nil {
+		t.Fatalf("GetOrCreateWing B: %v", err)
+	}
+
+	paths, err := s.ListWingPaths()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(paths) != 2 {
+		t.Fatalf("expected 2 paths, got %d", len(paths))
+	}
+	if paths[0] != "/home/user/projectA" || paths[1] != "/home/user/projectB" {
+		t.Fatalf("unexpected paths: %+v", paths)
+	}
+}
+
+func TestListWingPathsEmpty(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "memremark.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+
+	paths, err := s.ListWingPaths()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(paths) != 0 {
+		t.Fatalf("expected 0 paths, got %d", len(paths))
+	}
+}
+

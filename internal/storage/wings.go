@@ -112,3 +112,23 @@ func (s *Store) ListWings() ([]Wing, error) {
 	}
 	return wings, rows.Err()
 }
+
+// ListWingPaths returns the canonical paths of all registered wings in the store.
+func (s *Store) ListWingPaths() ([]string, error) {
+	rows, err := s.db.Query(`SELECT path FROM wings ORDER BY id ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("storage: list wing paths: %w", err)
+	}
+	defer rows.Close()
+
+	var paths []string
+	for rows.Next() {
+		var path string
+		if err := rows.Scan(&path); err != nil {
+			return nil, fmt.Errorf("storage: scan wing path: %w", err)
+		}
+		paths = append(paths, path)
+	}
+	return paths, rows.Err()
+}
+
