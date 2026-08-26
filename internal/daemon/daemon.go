@@ -39,6 +39,7 @@ type Daemon struct {
 	antigravitySummariesModTime time.Time
 	antigravitySummariesSize    int64
 	antigravityConvs            []antigravity.ConversationInfo
+	antigravityConvWing         map[string]string
 	antigravityDBMeta           map[string]dbMeta
 	antigravityLastIdx          map[string]int64
 
@@ -65,6 +66,7 @@ func New(store *storage.Store, claudeProjectsRoot, antigravitySummariesDB string
 		claudeTailer:           claudecode.NewTailer(),
 		claudeParsers:          make(map[string]*claudecode.Parser),
 		antigravitySummariesDB: antigravitySummariesDB,
+		antigravityConvWing:    make(map[string]string),
 		antigravityDBMeta:      make(map[string]dbMeta),
 		antigravityLastIdx:     make(map[string]int64),
 		sessionWing:            make(map[string]int64),

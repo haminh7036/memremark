@@ -19,46 +19,106 @@ func antigravityConvKey(conversationID string) string {
 }
 
 func (d *Daemon) pollAntigravity(now time.Time) error {
-	// Tolerate a summaries DB that doesn't exist yet -- e.g. any machine
-	// where the user has only ever used Claude Code, never Antigravity CLI.
-	// Same tolerance pattern claudecode.DiscoverTranscriptFiles already uses
-	// for a missing ~/.claude/projects directory: "doesn't exist" means "no
-	// conversations, nothing to do", not an error to log every poll tick.
-	info, err := os.Stat(d.antigravitySummariesDB)
+	conversationsDir := filepath.Join(filepath.Dir(d.antigravitySummariesDB), "conversations")
+	diskConvIDs, err := antigravity.DiscoverConversationDBs(conversationsDir)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
+		log.Printf("daemon: discover antigravity dbs: %v", err)
+	}
+
+	// Tolerate a summaries DB that doesn't exist yet -- e.g. any machine
+	// where the user has only ever used Claude Code, never Antigravity CLI,
+	// or where active sessions are in progress before summaries DB is created.
+	info, err := os.Stat(d.antigravitySummariesDB)
+	if err == nil {
+		if d.antigravityConvs == nil || !info.ModTime().Equal(d.antigravitySummariesModTime) || info.Size() != d.antigravitySummariesSize {
+			freshConvs, err := antigravity.ListConversations(d.antigravitySummariesDB)
+			if err != nil {
+				return err
+			}
+			d.antigravityConvs = freshConvs
+			d.antigravitySummariesModTime = info.ModTime()
+			d.antigravitySummariesSize = info.Size()
 		}
+	} else if !os.IsNotExist(err) {
 		return err
 	}
 
-	convs := d.antigravityConvs
-	if d.antigravityConvs == nil || !info.ModTime().Equal(d.antigravitySummariesModTime) || info.Size() != d.antigravitySummariesSize {
-		freshConvs, err := antigravity.ListConversations(d.antigravitySummariesDB)
-		if err != nil {
-			return err
-		}
-		d.antigravityConvs = freshConvs
-		d.antigravitySummariesModTime = info.ModTime()
-		d.antigravitySummariesSize = info.Size()
-		convs = freshConvs
+	// Merge indexed conversations from summaries.db with discovered .db files on disk
+	seen := make(map[string]bool)
+	var allConvs []antigravity.ConversationInfo
+
+	for _, conv := range d.antigravityConvs {
+		seen[conv.ID] = true
+		allConvs = append(allConvs, conv)
 	}
 
-	for _, conv := range convs {
+	for _, id := range diskConvIDs {
+		if !seen[id] {
+			seen[id] = true
+			allConvs = append(allConvs, antigravity.ConversationInfo{
+				ID: id,
+			})
+		}
+	}
+
+	if len(allConvs) == 0 {
+		return nil
+	}
+
+	if d.antigravityConvWing == nil {
+		d.antigravityConvWing = make(map[string]string)
+	}
+	if d.antigravityDBMeta == nil {
+		d.antigravityDBMeta = make(map[string]dbMeta)
+	}
+	if d.antigravityLastIdx == nil {
+		d.antigravityLastIdx = make(map[string]int64)
+	}
+
+	var knownWings []string
+	var knownWingsLoaded bool
+	getKnownWings := func() []string {
+		if !knownWingsLoaded && d.Store != nil {
+			var err error
+			knownWings, err = d.Store.ListWingPaths()
+			if err != nil {
+				log.Printf("daemon: list wing paths: %v", err)
+			}
+			knownWingsLoaded = true
+		}
+		return knownWings
+	}
+
+	for _, conv := range allConvs {
 		if d.isSummarySession(conv.ID) {
 			continue
 		}
-		cleanWingPath := antigravity.ExtractWorkspacePath(conv.WorkspaceURIs)
+
+		cleanWingPath := d.antigravityConvWing[conv.ID]
+		if cleanWingPath == "" && conv.WorkspaceURIs != "" {
+			cleanWingPath = antigravity.ExtractWorkspacePath(conv.WorkspaceURIs)
+			if cleanWingPath != "" {
+				d.antigravityConvWing[conv.ID] = cleanWingPath
+			}
+		}
+
+		dbPath := filepath.Join(conversationsDir, conv.ID+".db")
+		if cleanWingPath == "" {
+			cleanWingPath = antigravity.ExtractWorkspacePathFromDB(dbPath, getKnownWings())
+			if cleanWingPath != "" {
+				d.antigravityConvWing[conv.ID] = cleanWingPath
+			}
+		}
 		if cleanWingPath == "" {
 			continue
 		}
-		dbPath := filepath.Join(filepath.Dir(d.antigravitySummariesDB), "conversations", conv.ID+".db")
+
 		dbInfo, err := os.Stat(dbPath)
 		if err != nil {
 			continue
 		}
-		meta, seen := d.antigravityDBMeta[conv.ID]
-		if seen && !meta.modTime.IsZero() && dbInfo.ModTime().Equal(meta.modTime) && dbInfo.Size() == meta.size {
+		meta, seenMeta := d.antigravityDBMeta[conv.ID]
+		if seenMeta && !meta.modTime.IsZero() && dbInfo.ModTime().Equal(meta.modTime) && dbInfo.Size() == meta.size {
 			continue
 		}
 
@@ -74,7 +134,13 @@ func (d *Daemon) pollAntigravity(now time.Time) error {
 				sinceIdx = persisted
 			}
 		}
-		obs, maxIdx, err := antigravity.ReadObservations(dbPath, cleanWingPath, conv.ID, conv.LastModified, sinceIdx)
+
+		lastModified := conv.LastModified
+		if lastModified.IsZero() {
+			lastModified = dbInfo.ModTime()
+		}
+
+		obs, maxIdx, err := antigravity.ReadObservations(dbPath, cleanWingPath, conv.ID, lastModified, sinceIdx)
 		if err != nil {
 			// Task 8's code review flagged this: on a mid-scan error, maxIdx may
 			// already be advanced past rows that weren't returned in obs. Do NOT
