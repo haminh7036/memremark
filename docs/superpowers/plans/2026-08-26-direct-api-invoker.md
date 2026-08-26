@@ -326,7 +326,7 @@ import (
 	"testing"
 )
 
-func TestAnthropicAPIInvoker_ToolUseSuccess(t *testing.T) {
+func TestAnthropicAPIInvoker_StructuredOutputSuccess(t *testing.T) {
 	expectedItems := `[{"hall":"discovery","content":"Found root cause"}]`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -342,13 +342,8 @@ func TestAnthropicAPIInvoker_ToolUseSuccess(t *testing.T) {
 		resp := map[string]any{
 			"content": []any{
 				map[string]any{
-					"type": "tool_use",
-					"name": "distill_memories",
-					"input": map[string]any{
-						"items": []map[string]string{
-							{"hall": "discovery", "content": "Found root cause"},
-						},
-					},
+					"type": "text",
+					"text": expectedItems,
 				},
 			},
 		}
@@ -424,30 +419,25 @@ type anthropicMessageParam struct {
 	Content string `json:"content"`
 }
 
-type anthropicToolChoice struct {
-	Type string `json:"type"`
-	Name string `json:"name,omitempty"`
+type anthropicFormat struct {
+	Type   string         `json:"type"`
+	Schema map[string]any `json:"schema"`
 }
 
-type anthropicTool struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	InputSchema map[string]any `json:"input_schema"`
+type anthropicOutputConfig struct {
+	Format anthropicFormat `json:"format"`
 }
 
 type anthropicRequest struct {
-	Model      string                  `json:"model"`
-	MaxTokens  int                     `json:"max_tokens"`
-	Messages   []anthropicMessageParam `json:"messages"`
-	Tools      []anthropicTool         `json:"tools,omitempty"`
-	ToolChoice *anthropicToolChoice    `json:"tool_choice,omitempty"`
+	Model        string                  `json:"model"`
+	MaxTokens    int                     `json:"max_tokens"`
+	Messages     []anthropicMessageParam `json:"messages"`
+	OutputConfig anthropicOutputConfig   `json:"output_config"`
 }
 
 type anthropicContentBlock struct {
-	Type  string          `json:"type"`
-	Text  string          `json:"text,omitempty"`
-	Name  string          `json:"name,omitempty"`
-	Input json.RawMessage `json:"input,omitempty"`
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
 }
 
 type anthropicResponse struct {
@@ -458,7 +448,7 @@ type anthropicResponse struct {
 	} `json:"error,omitempty"`
 }
 
-// Invoke calls Anthropic Messages API with forced tool calling.
+// Invoke calls Anthropic Messages API with output_config.format Structured Outputs.
 func (inv AnthropicAPIInvoker) Invoke(ctx context.Context, prompt string, opts ...InvokerOptions) (string, error) {
 	if inv.APIKey == "" {
 		return "", fmt.Errorf("summarizer: anthropic API key is required")
@@ -472,13 +462,16 @@ func (inv AnthropicAPIInvoker) Invoke(ctx context.Context, prompt string, opts .
 		baseURL = DefaultAnthropicBaseURL
 	}
 
-	distillTool := anthropicTool{
-		Name:        "distill_memories",
-		Description: "Distill observations into hall-classified memory items",
-		InputSchema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"items": map[string]any{
+	reqBody := anthropicRequest{
+		Model:     model,
+		MaxTokens: 4096,
+		Messages: []anthropicMessageParam{
+			{Role: "user", Content: prompt},
+		},
+		OutputConfig: anthropicOutputConfig{
+			Format: anthropicFormat{
+				Type: "json_schema",
+				Schema: map[string]any{
 					"type": "array",
 					"items": map[string]any{
 						"type": "object",
@@ -491,24 +484,11 @@ func (inv AnthropicAPIInvoker) Invoke(ctx context.Context, prompt string, opts .
 								"type": "string",
 							},
 						},
-						"required": []string{"hall", "content"},
+						"required":             []string{"hall", "content"},
+						"additionalProperties": false,
 					},
 				},
 			},
-			"required": []string{"items"},
-		},
-	}
-
-	reqBody := anthropicRequest{
-		Model:     model,
-		MaxTokens: 4096,
-		Messages: []anthropicMessageParam{
-			{Role: "user", Content: prompt},
-		},
-		Tools: []anthropicTool{distillTool},
-		ToolChoice: &anthropicToolChoice{
-			Type: "tool",
-			Name: "distill_memories",
 		},
 	}
 
@@ -556,24 +536,12 @@ func (inv AnthropicAPIInvoker) Invoke(ctx context.Context, prompt string, opts .
 	}
 
 	for _, block := range aResp.Content {
-		if block.Type == "tool_use" && block.Name == "distill_memories" {
-			var parsedInput struct {
-				Items []SummaryItem `json:"items"`
-			}
-			if err := json.Unmarshal(block.Input, &parsedInput); err == nil && parsedInput.Items != nil {
-				itemsJSON, err := json.Marshal(parsedInput.Items)
-				if err == nil {
-					return string(itemsJSON), nil
-				}
-			}
-			return string(block.Input), nil
-		}
 		if block.Type == "text" && block.Text != "" {
 			return block.Text, nil
 		}
 	}
 
-	return "", fmt.Errorf("summarizer: anthropic API returned no usable content block")
+	return "", fmt.Errorf("summarizer: anthropic API returned empty content")
 }
 ```
 

@@ -92,7 +92,7 @@ Calls Google's Gemini REST API (`v1beta`):
 
 ### 3.2. `AnthropicAPIInvoker`
 
-Calls Anthropic Messages REST API (`v1`) with **Forced Tool Calling** (`tool_choice`) to strictly enforce JSON schema and prevent conversational formatting:
+Calls Anthropic Messages REST API (`v1`) with native **Structured Outputs** (`output_config.format`) to strictly enforce JSON schema:
 - **Default Endpoint:** `https://api.anthropic.com/v1/messages`
 - **Default Model:** `claude-3-5-haiku-20241022` (configurable via `anthropic_model`)
 - **Headers:**
@@ -110,41 +110,31 @@ Calls Anthropic Messages REST API (`v1`) with **Forced Tool Calling** (`tool_cho
       "content": "<prompt>"
     }
   ],
-  "tools": [
-    {
-      "name": "distill_memories",
-      "description": "Distill observations into memory items",
-      "input_schema": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "hall": {
-                  "type": "string",
-                  "enum": ["fact", "discovery", "preference", "advice"]
-                },
-                "content": {
-                  "type": "string"
-                }
-              },
-              "required": ["hall", "content"]
+  "output_config": {
+    "format": {
+      "type": "json_schema",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "hall": {
+              "type": "string",
+              "enum": ["fact", "discovery", "preference", "advice"]
+            },
+            "content": {
+              "type": "string"
             }
-          }
-        },
-        "required": ["items"]
+          },
+          "required": ["hall", "content"],
+          "additionalProperties": false
+        }
       }
     }
-  ],
-  "tool_choice": {
-    "type": "tool",
-    "name": "distill_memories"
   }
 }
 ```
-- **Response Extraction:** Reads `content` block of `type == "tool_use"` with `name == "distill_memories"`, serializes `input.items` to JSON string. If response is standard `type == "text"`, extracts `text` directly (fallback compatibility).
+- **Response Extraction:** Reads `content[0].text` directly (Claude's response is guaranteed to be valid JSON matching the schema in the text block). If model falls back to tool use or multiple blocks, safely extracts and normalizes the text.
 
 ### 3.3. Invoker Struct Definitions
 
