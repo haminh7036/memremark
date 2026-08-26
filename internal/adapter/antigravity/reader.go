@@ -200,7 +200,7 @@ func DiscoverConversationDBs(conversationsDir string) ([]string, error) {
 			continue
 		}
 		name := entry.Name()
-		if strings.HasSuffix(name, ".db") && !strings.HasSuffix(name, ".db-wal") && !strings.HasSuffix(name, ".db-shm") {
+		if strings.HasSuffix(name, ".db") && name != ".db" {
 			convID := strings.TrimSuffix(name, ".db")
 			if convID != "" {
 				ids = append(ids, convID)
@@ -243,6 +243,19 @@ func ExtractWorkspacePathFromDB(conversationDBPath string, knownWings []string) 
 					rawURI = rawURI[:endIdx]
 				}
 				if cleaned := ExtractWorkspacePath(rawURI); cleaned != "" {
+					// If cleaned path is a file or subpath inside a known wing, map to the registered wing root
+					var bestWing string
+					for _, wing := range knownWings {
+						cleanWing := filepath.Clean(wing)
+						if cleanWing != "" && (cleaned == cleanWing || strings.HasPrefix(cleaned, cleanWing+string(filepath.Separator))) {
+							if len(cleanWing) > len(bestWing) {
+								bestWing = cleanWing
+							}
+						}
+					}
+					if bestWing != "" {
+						return bestWing
+					}
 					return cleaned
 				}
 			}
