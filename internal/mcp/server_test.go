@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/haminh7036/memremark/internal/storage"
+	"github.com/haminh7036/memremark/internal/version"
 )
 
 func setupTestServer(t *testing.T) (*Server, *storage.Store, *bytes.Buffer) {
@@ -71,7 +72,7 @@ func TestMCP_Initialize(t *testing.T) {
 	if !ok {
 		t.Fatalf("missing or invalid serverInfo: %v", resMap["serverInfo"])
 	}
-	if serverInfo["name"] != "memremark-mcp" || serverInfo["version"] != "0.1.5" {
+	if serverInfo["name"] != "memremark-mcp" || serverInfo["version"] != version.Version {
 		t.Fatalf("unexpected serverInfo: %v", serverInfo)
 	}
 }
