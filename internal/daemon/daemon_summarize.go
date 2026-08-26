@@ -35,17 +35,16 @@ func (d *Daemon) recordObservation(obs observation.Observation, invoker summariz
 // maxSummarizeBatchBytes bounds how much verbatim content one Summarize call
 // may cover.
 //
-// ponytail: incident 2026-08-18 -- a session whose summarization kept
-// failing accumulated 1,315 verbatim rows (~3.5MB) with no cap, and
-// summarizeSession passed the whole backlog as one exec.Command argv
-// element. The real, tighter limit that bit is Linux's per-argument
-// MAX_ARG_STRLEN (32 pages = 131,072 bytes), not the much larger total
-// ARG_MAX (2,097,152 bytes) -- confirmed by direct repro (a 140,000-byte
-// single argv already fails). ClaudeCodeInvoker now sends the prompt via
-// stdin instead (no such limit), but AntigravityInvoker (agy -p) has no
-// verified stdin support, so this cap stays well under 131,072 bytes to
-// keep that path safe regardless of backlog size.
-const maxSummarizeBatchBytes = 100_000
+// Previously capped at 100KB to stay under Linux's per-argument MAX_ARG_STRLEN
+// (131,072 bytes) when the prompt was passed via `agy -p`.  Since agy now
+// reads the prompt from stdin there is no OS-level size constraint.
+//
+// The effective limit is the LLM's context window.  agy uses Gemini with a
+// ~1M-token context window.  1M tokens ≈ 3–4 MB of mixed code/text content
+// (tool outputs tokenize at ~3–4 chars/token on average).  We cap at 3 MB
+// to leave room for the system-prompt wrapper and the response, giving us
+// ~30× larger batches than before and reducing API round-trips proportionally.
+const maxSummarizeBatchBytes = 3_000_000
 
 func (d *Daemon) summarizeSession(ctx context.Context, sessionID string, now time.Time) error {
 	return d.summarizeSessionWithBatchSize(ctx, sessionID, now, maxSummarizeBatchBytes)
