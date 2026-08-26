@@ -104,7 +104,7 @@ type AntigravityInvoker struct {
 	Effort string
 }
 
-func (inv AntigravityInvoker) buildArgs(sessionID string) []string {
+func (inv AntigravityInvoker) buildArgs(prompt, sessionID string) []string {
 	args := []string{"--output-format", "json", "--disable-slash-commands"}
 	if sessionID != "" {
 		args = append(args, "--conversation", sessionID)
@@ -123,8 +123,7 @@ func (inv AntigravityInvoker) buildArgs(sessionID string) []string {
 	if effort != "default" && effort != "none" {
 		args = append(args, "--effort", effort)
 	}
-	// Prompt is delivered via stdin (no -p arg) to avoid Linux MAX_ARG_STRLEN
-	// (131,072 bytes) which causes EINVAL/E2BIG when verbatim backlogs are large.
+	args = append(args, "-p", prompt)
 	return args
 }
 
@@ -137,8 +136,7 @@ func (inv AntigravityInvoker) Invoke(ctx context.Context, prompt string, opts ..
 	if opt.SessionID != "" {
 		ensureAntigravityConversationFile(opt.SessionID)
 	}
-	cmd := exec.CommandContext(ctx, "agy", inv.buildArgs(opt.SessionID)...)
-	cmd.Stdin = strings.NewReader(prompt)
+	cmd := exec.CommandContext(ctx, "agy", inv.buildArgs(prompt, opt.SessionID)...)
 	if opt.WorkDir != "" {
 		if info, err := os.Stat(opt.WorkDir); err == nil && info.IsDir() {
 			cmd.Dir = opt.WorkDir

@@ -423,30 +423,34 @@ func TestClaudeCodeInvoker_BuildArgs(t *testing.T) {
 
 func TestAntigravityInvoker_BuildArgs(t *testing.T) {
 	tests := []struct {
-		name      string
-		invoker   AntigravityInvoker
-		wantArgs  []string
+		name     string
+		invoker  AntigravityInvoker
+		prompt   string
+		wantArgs []string
 	}{
 		{
 			name:     "default empty uses default model and low effort",
 			invoker:  AntigravityInvoker{},
-			wantArgs: []string{"--output-format", "json", "--disable-slash-commands", "--model", "gemini-3.7-flash-low", "--effort", "low"},
+			prompt:   "test prompt",
+			wantArgs: []string{"--output-format", "json", "--disable-slash-commands", "--model", "gemini-3.7-flash-low", "--effort", "low", "-p", "test prompt"},
 		},
 		{
 			name:     "custom model and effort",
 			invoker:  AntigravityInvoker{Model: "gemini-3.5-flash-low", Effort: "medium"},
-			wantArgs: []string{"--output-format", "json", "--disable-slash-commands", "--model", "gemini-3.5-flash-low", "--effort", "medium"},
+			prompt:   "test prompt",
+			wantArgs: []string{"--output-format", "json", "--disable-slash-commands", "--model", "gemini-3.5-flash-low", "--effort", "medium", "-p", "test prompt"},
 		},
 		{
 			name:     "keyword 'default' omits model and effort",
 			invoker:  AntigravityInvoker{Model: "default", Effort: "default"},
-			wantArgs: []string{"--output-format", "json", "--disable-slash-commands"},
+			prompt:   "test prompt",
+			wantArgs: []string{"--output-format", "json", "--disable-slash-commands", "-p", "test prompt"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			args := tt.invoker.buildArgs("")
+			args := tt.invoker.buildArgs(tt.prompt, "")
 			if len(args) != len(tt.wantArgs) {
 				t.Fatalf("got args %v, want %v", args, tt.wantArgs)
 			}
@@ -487,7 +491,7 @@ func TestClaudeCodeInvoker_BuildArgs_WithSessionID(t *testing.T) {
 
 func TestAntigravityInvoker_BuildArgs_WithConversationID(t *testing.T) {
 	inv := AntigravityInvoker{Model: "gemini-3.7-flash-low", Effort: "low"}
-	args := inv.buildArgs("conv-uuid-5678")
+	args := inv.buildArgs("test prompt", "conv-uuid-5678")
 	hasConvFlag := false
 	for i, a := range args {
 		if a == "--conversation" && i+1 < len(args) && args[i+1] == "conv-uuid-5678" {

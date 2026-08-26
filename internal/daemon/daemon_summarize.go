@@ -35,16 +35,10 @@ func (d *Daemon) recordObservation(obs observation.Observation, invoker summariz
 // maxSummarizeBatchBytes bounds how much verbatim content one Summarize call
 // may cover.
 //
-// Previously capped at 100KB to stay under Linux's per-argument MAX_ARG_STRLEN
-// (131,072 bytes) when the prompt was passed via `agy -p`.  Since agy now
-// reads the prompt from stdin there is no OS-level size constraint.
-//
-// The effective limit is the LLM's context window.  agy uses Gemini with a
-// ~1M-token context window.  1M tokens ≈ 3–4 MB of mixed code/text content
-// (tool outputs tokenize at ~3–4 chars/token on average).  We cap at 3 MB
-// to leave room for the system-prompt wrapper and the response, giving us
-// ~30× larger batches than before and reducing API round-trips proportionally.
-const maxSummarizeBatchBytes = 3_000_000
+// agy -p passes the prompt as a CLI argv argument.  Linux's per-argument
+// MAX_ARG_STRLEN is 32 pages = 131,072 bytes.  We cap at 100,000 bytes so the
+// full prompt (system prompt + observations) stays safely below this limit.
+const maxSummarizeBatchBytes = 100_000
 
 func (d *Daemon) summarizeSession(ctx context.Context, sessionID string, now time.Time) error {
 	return d.summarizeSessionWithBatchSize(ctx, sessionID, now, maxSummarizeBatchBytes)
