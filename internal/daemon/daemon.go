@@ -97,21 +97,35 @@ func (d *Daemon) Warmup() error {
 	if err != nil {
 		return err
 	}
-	for _, ref := range refs {
+	// Stagger orphaned sessions instead of firing them all at epoch=0 so
+	// the very first PollOnce doesn't launch N concurrent agy processes at
+	// once (each pulling in a full MCP stack → 3–5GB RAM spike).
+	// Space them 1s apart; they all still fire well before a real idle
+	// window (5s) so no visible delay vs the previous behavior.
+	now := time.Now()
+	for i, ref := range refs {
 		if _, tracked := d.sessionWing[ref.SessionID]; tracked {
 			continue
 		}
 		d.sessionWing[ref.SessionID] = ref.WingID
 		d.sessionInvoker[ref.SessionID] = d.claudeInvoker
-		// Epoch guarantees Due() fires on the very first check, regardless
-		// of idleWindow, since now.Sub(epoch) is always far past it.
-		d.Tracker.Touch(ref.SessionID, time.Unix(0, 0))
+		// Distribute sessions so they fire 1s apart and are all
+		// already past idleWindow on the first PollOnce tick.
+		// Using -(idleWindow + (i+1)*second) ensures now-touchTime > idleWindow.
+		touchTime := now.Add(-idleWindow - time.Duration(i+1)*time.Second)
+		d.Tracker.Touch(ref.SessionID, touchTime)
 	}
 	return nil
 }
 
-// PollOnce runs one capture pass over both CLIs' transcripts, then
+// maxSessionsPerTick caps how many sessions PollOnce summarizes in a single
+// poll cycle.  Each agy invocation spawns a full MCP stack (~10 Node.js
+// children, ~200–400 MB each), so serializing them and capping at a small
+// number keeps RAM in check.  Remaining sessions stay Due and are processed
+// on subsequent ticks.
+const maxSessionsPerTick = 2
 
+// PollOnce runs one capture pass over both CLIs' transcripts, then
 // triggers summarization for any session that has gone idle.
 func (d *Daemon) PollOnce(ctx context.Context, now time.Time) error {
 	if err := d.pollClaudeCode(now); err != nil {
@@ -120,23 +134,25 @@ func (d *Daemon) PollOnce(ctx context.Context, now time.Time) error {
 	if err := d.pollAntigravity(now); err != nil {
 		log.Printf("daemon: antigravity poll error: %v", err)
 	}
+
+	processed := 0
 	for _, sessionID := range d.Tracker.Due(now, idleWindow) {
 		if ctx.Err() != nil {
+			break
+		}
+		if processed >= maxSessionsPerTick {
 			break
 		}
 		if err := d.summarizeSession(ctx, sessionID, now); err != nil {
 			if ctx.Err() != nil {
 				break
 			}
-			// Do NOT consume the session on failure -- leave it due so the
-			// very next poll tick retries it (a few seconds later, not a
-			// whole new idle window). Matches the watermark-on-error
-			// tolerance already used in pollAntigravity: just retry next
-			// tick, no backoff, no dead-lettering.
+			// Do NOT consume on failure -- retry next tick.
 			log.Printf("daemon: summarize session %s failed: %v", sessionID, err)
 			continue
 		}
 		d.Tracker.Consume(sessionID)
+		processed++
 	}
 	return nil
 }
