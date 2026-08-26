@@ -17,7 +17,7 @@ Built with inspiration from [Claude Mem](https://github.com/thedotmack/claude-me
 
 MemRemark operates as an **Active Memory Palace**:
 1. **Passive Observation**: Asynchronously tails CLI transcripts and tool interactions from Claude Code and Antigravity CLI without introducing runtime overhead.
-2. **Semantic Distillation**: A lightweight background daemon leverages low-cost models (`haiku`, `gemini-3.7-flash-low`) to distill session logs into structured SQLite drawers (`fact`, `discovery`, `preference`, `advice`).
+2. **Semantic Distillation**: A lightweight background daemon leverages low-cost models to distill session logs into structured SQLite drawers (`fact`, `discovery`, `preference`, `advice`). Supports **Direct API Invokers** (Google Gemini & Anthropic API) for near 0MB RAM addition and <1s latency, with seamless bidirectional fallback to headless CLI tools (`agy -p`, `claude -p`).
 3. **Zero-Latency Context Injection**: Automatically injects relevant workspace knowledge into new sessions via CLI hooks (`SessionStart`, `PreInvocation`).
 4. **Active Knowledge Retrieval**: Empowers AI agents to explicitly search, record, and prune project memories on demand via Model Context Protocol (MCP) tools.
 5. **Timeline Dashboard**: A standalone local web viewer (`memremark-ui`) with a Vue 3.5 + Tailwind v4 interactive timeline.
@@ -27,7 +27,8 @@ MemRemark operates as an **Active Memory Palace**:
 ## Project Status & Roadmap
 - **Phase 1: Core Engine, MCP Server & Web Dashboard (Single Host)** — **`v0.1.6` (Complete & Tested)**
   - Transcript tailing & SQLite state capture for Claude Code and Antigravity CLI.
-  - Headless background summarizer daemon with **dynamic startup capability discovery** and bidirectional auto-fallback.
+  - Headless background summarizer daemon with **Direct API Invokers (Gemini & Anthropic)**, **dynamic startup capability discovery**, and bidirectional auto-fallback.
+  - **Zero-Overhead Memory Distillation**: Near 0MB RAM addition (vs ~1.2GB peak RSS with `agy -p`) and <1s latency when API keys are present.
   - **Locale-Adaptive Knowledge Distillation**: Auto-detects user environment locale (`$LANG`, `$LC_ALL`) with dual-layer tech term preservation and multi-language context injection headers.
   - **Single-CLI & Multi-CLI Standalone Support**: Runs seamlessly on machines with only Claude Code, only Antigravity CLI, or both.
   - Seamless context injection hooks (`memremark-hook-claude` and `memremark-hook-agy`).
@@ -69,10 +70,6 @@ The `install.sh` script automatically:
 
 # Or install for Claude Code only:
 ./install.sh --cli=claude
-
-# Complete uninstall (removes service, binaries, hooks, and MCP servers):
-./install.sh --uninstall
-```
 
 # Complete uninstall (removes service, binaries, hooks, and MCP servers):
 ./install.sh --uninstall
@@ -167,15 +164,20 @@ memremark-ui --no-open
 
 ## Configuration (`config.json`)
 
-By default, `memremarkd` uses the lightest and fastest models to minimize token costs and RAM usage (`haiku` for Claude Code, `gemini-3.7-flash-low` with `--effort low` for Antigravity CLI).
+By default, `memremarkd` uses direct HTTP API invokers when API keys are present (for near-zero memory footprint and sub-second latency) or falls back to the lightest, fastest CLI models (`haiku` for Claude Code, `gemini-3.7-flash-low` with `--effort low` for Antigravity CLI).
 
-You can customize models and UI settings in `~/.memremark/config.json`:
+You can customize provider preference, direct API keys, models, and UI settings in `~/.memremark/config.json`:
 
 ```json
 {
   "$schema": "./config.schema.json",
   "language": "auto",
   "summarizer": {
+    "provider": "auto",
+    "gemini_api_key": "",
+    "gemini_model": "gemini-2.5-flash",
+    "anthropic_api_key": "",
+    "anthropic_model": "claude-3-5-haiku-20241022",
     "claude_model": "haiku",
     "antigravity_model": "gemini-3.7-flash-low",
     "antigravity_effort": "low"
@@ -188,16 +190,37 @@ You can customize models and UI settings in `~/.memremark/config.json`:
 }
 ```
 
+### Direct API Invoker Benefits & Provider Strategy
+
+| Feature | Direct API Invoker (`gemini` / `anthropic`) | CLI Subprocess (`agy -p` / `claude -p`) |
+| :--- | :--- | :--- |
+| **Memory Footprint** | **Near 0MB RAM addition** (in-process Go HTTP request, daemon RSS <10MB) | Spawns full MCP runtime stack (~10 Node.js children, **~1.2GB peak RSS** with `agy -p`) |
+| **Distillation Latency** | **<1s latency** | 3s – 8s CLI bootstrap & execution |
+| **Prerequisites** | `GEMINI_API_KEY` or `ANTHROPIC_API_KEY` | CLI binary installed in PATH (`agy` / `claude`) |
+
+#### Provider Options:
+- `"auto"` *(default)*: Uses Gemini API (if key present) -> Anthropic API (if key present) -> auto-detected CLI binaries in PATH (`claude`, `agy`).
+- `"gemini"`: Explicitly prioritize Google Gemini API. Falls back to Anthropic API -> installed CLIs.
+- `"anthropic"`: Explicitly prioritize Anthropic Claude API. Falls back to Gemini API -> installed CLIs.
+- `"antigravity"`: Force Antigravity CLI (`agy -p`) as primary summarizer, falling back to Claude Code CLI.
+- `"claude"`: Force Claude Code CLI (`claude -p`) as primary summarizer, falling back to Antigravity CLI.
+
 * **Schema:** `install.sh` installs `config.schema.json` next to `config.json` in `~/.memremark/` for IDE validation/autocomplete.
-* **Precedence:** Environment variables (`MEMREMARK_*`) > `config.json` > Default fallback.
+* **Precedence:** Environment variables (`MEMREMARK_*`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`) > `config.json` > Default fallback.
 * **Note:** `memremark-ui` also accepts `--host`, `--port`, `--db`, `--no-open` flags, which take precedence over everything above.
-* **Environment variables:**
-  - `MEMREMARK_LANGUAGE`: Override output language (e.g. `vi`, `en`, `ja`, `auto`). Falls back to `$LC_ALL` / `$LC_MESSAGES` / `$LANG` when unset.
-  - `MEMREMARK_CLAUDE_MODEL`: Override Claude model (e.g. `haiku`, `claude-3-5-sonnet`, `default`).
-  - `MEMREMARK_ANTIGRAVITY_MODEL`: Override Antigravity model (e.g. `gemini-3.7-flash-low`, `flash_lite`, `default`).
-  - `MEMREMARK_ANTIGRAVITY_EFFORT`: Override effort level (`low`, `medium`, `high`, `default`).
-  - `MEMREMARK_UI_HOST`: Custom UI host binding.
-  - `MEMREMARK_UI_PORT`: Custom UI port.
+
+### Supported Environment Variables:
+- `GEMINI_API_KEY` / `MEMREMARK_GEMINI_API_KEY`: Google Gemini API key for direct HTTP summarization.
+- `MEMREMARK_GEMINI_MODEL`: Override Gemini API model (default: `gemini-2.5-flash`).
+- `ANTHROPIC_API_KEY` / `MEMREMARK_ANTHROPIC_API_KEY`: Anthropic API key for direct HTTP summarization.
+- `MEMREMARK_ANTHROPIC_MODEL`: Override Anthropic API model (default: `claude-3-5-haiku-20241022`).
+- `MEMREMARK_SUMMARIZER_PROVIDER`: Override summarizer provider preference (`auto`, `gemini`, `anthropic`, `antigravity`, `claude`).
+- `MEMREMARK_LANGUAGE`: Override output language (e.g. `vi`, `en`, `ja`, `auto`). Falls back to `$LC_ALL` / `$LC_MESSAGES` / `$LANG` when unset.
+- `MEMREMARK_CLAUDE_MODEL`: Override Claude CLI model (e.g. `haiku`, `claude-3-5-sonnet`, `default`).
+- `MEMREMARK_ANTIGRAVITY_MODEL`: Override Antigravity CLI model (e.g. `gemini-3.7-flash-low`, `flash_lite`, `default`).
+- `MEMREMARK_ANTIGRAVITY_EFFORT`: Override effort level (`low`, `medium`, `high`, `default`).
+- `MEMREMARK_UI_HOST`: Custom UI host binding (e.g. `127.0.0.1`, `0.0.0.0`).
+- `MEMREMARK_UI_PORT`: Custom UI port (e.g. `8765`, `9000`).
 
 ---
 
