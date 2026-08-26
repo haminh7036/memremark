@@ -12,6 +12,12 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Language != "auto" {
 		t.Errorf("expected default language 'auto', got %q", cfg.Language)
 	}
+	if cfg.Summarizer.GeminiModel != DefaultGeminiModel {
+		t.Errorf("expected default gemini_model %q, got %q", DefaultGeminiModel, cfg.Summarizer.GeminiModel)
+	}
+	if cfg.Summarizer.AnthropicModel != DefaultAnthropicModel {
+		t.Errorf("expected default anthropic_model %q, got %q", DefaultAnthropicModel, cfg.Summarizer.AnthropicModel)
+	}
 	if cfg.Summarizer.ClaudeModel != "haiku" {
 		t.Errorf("expected default claude_model 'haiku', got %q", cfg.Summarizer.ClaudeModel)
 	}
@@ -247,5 +253,85 @@ func TestConfig_SummarizerProvider(t *testing.T) {
 		t.Errorf("expected env override 'claude', got %q", envCfg.Summarizer.Provider)
 	}
 }
+
+func TestConfig_APIKeyOverrides(t *testing.T) {
+	t.Setenv("GEMINI_API_KEY", "env-gemini-key")
+	t.Setenv("ANTHROPIC_API_KEY", "env-anthropic-key")
+	t.Setenv("MEMREMARK_GEMINI_MODEL", "gemini-2.5-pro")
+	t.Setenv("MEMREMARK_ANTHROPIC_MODEL", "claude-3-haiku-20240307")
+
+	cfg, err := LoadFromFile("/nonexistent/path/config.json")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.Summarizer.GeminiAPIKey != "env-gemini-key" {
+		t.Errorf("expected GeminiAPIKey 'env-gemini-key', got '%s'", cfg.Summarizer.GeminiAPIKey)
+	}
+	if cfg.Summarizer.AnthropicAPIKey != "env-anthropic-key" {
+		t.Errorf("expected AnthropicAPIKey 'env-anthropic-key', got '%s'", cfg.Summarizer.AnthropicAPIKey)
+	}
+	if cfg.Summarizer.GeminiModel != "gemini-2.5-pro" {
+		t.Errorf("expected GeminiModel 'gemini-2.5-pro', got '%s'", cfg.Summarizer.GeminiModel)
+	}
+	if cfg.Summarizer.AnthropicModel != "claude-3-haiku-20240307" {
+		t.Errorf("expected AnthropicModel 'claude-3-haiku-20240307', got '%s'", cfg.Summarizer.AnthropicModel)
+	}
+}
+
+func TestConfig_MemremarkPrefixPrecedence(t *testing.T) {
+	t.Setenv("GEMINI_API_KEY", "generic-gemini-key")
+	t.Setenv("MEMREMARK_GEMINI_API_KEY", "prefixed-gemini-key")
+	t.Setenv("ANTHROPIC_API_KEY", "generic-anthropic-key")
+	t.Setenv("MEMREMARK_ANTHROPIC_API_KEY", "prefixed-anthropic-key")
+
+	cfg, err := LoadFromFile("/nonexistent/path/config.json")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.Summarizer.GeminiAPIKey != "prefixed-gemini-key" {
+		t.Errorf("expected GeminiAPIKey 'prefixed-gemini-key', got '%s'", cfg.Summarizer.GeminiAPIKey)
+	}
+	if cfg.Summarizer.AnthropicAPIKey != "prefixed-anthropic-key" {
+		t.Errorf("expected AnthropicAPIKey 'prefixed-anthropic-key', got '%s'", cfg.Summarizer.AnthropicAPIKey)
+	}
+}
+
+func TestConfig_APIKeysFromJSON(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.json")
+	jsonContent := `{
+		"summarizer": {
+			"gemini_api_key": "json-gemini-key",
+			"gemini_model": "gemini-custom",
+			"anthropic_api_key": "json-anthropic-key",
+			"anthropic_model": "claude-custom"
+		}
+	}`
+	if err := os.WriteFile(configPath, []byte(jsonContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFromFile(configPath)
+	if err != nil {
+		t.Fatalf("LoadFromFile failed: %v", err)
+	}
+
+	if cfg.Summarizer.GeminiAPIKey != "json-gemini-key" {
+		t.Errorf("expected GeminiAPIKey 'json-gemini-key', got '%s'", cfg.Summarizer.GeminiAPIKey)
+	}
+	if cfg.Summarizer.GeminiModel != "gemini-custom" {
+		t.Errorf("expected GeminiModel 'gemini-custom', got '%s'", cfg.Summarizer.GeminiModel)
+	}
+	if cfg.Summarizer.AnthropicAPIKey != "json-anthropic-key" {
+		t.Errorf("expected AnthropicAPIKey 'json-anthropic-key', got '%s'", cfg.Summarizer.AnthropicAPIKey)
+	}
+	if cfg.Summarizer.AnthropicModel != "claude-custom" {
+		t.Errorf("expected AnthropicModel 'claude-custom', got '%s'", cfg.Summarizer.AnthropicModel)
+	}
+}
+
+
 
 

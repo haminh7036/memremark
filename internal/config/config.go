@@ -12,6 +12,8 @@ import (
 const (
 	DefaultLanguage          = "auto"
 	DefaultProvider          = "auto"
+	DefaultGeminiModel       = "gemini-2.5-flash"
+	DefaultAnthropicModel    = "claude-3-5-haiku-20241022"
 	DefaultClaudeModel       = "haiku"
 	DefaultAntigravityModel  = "gemini-3.7-flash-low"
 	DefaultAntigravityEffort = "low"
@@ -19,9 +21,13 @@ const (
 	DefaultUIPort            = 8765
 )
 
-// SummarizerConfig specifies model parameters for headless distillers.
+// SummarizerConfig specifies model parameters for headless distillers and direct API invokers.
 type SummarizerConfig struct {
 	Provider          string `json:"provider"`
+	GeminiAPIKey      string `json:"gemini_api_key"`
+	GeminiModel       string `json:"gemini_model"`
+	AnthropicAPIKey   string `json:"anthropic_api_key"`
+	AnthropicModel    string `json:"anthropic_model"`
 	ClaudeModel       string `json:"claude_model"`
 	AntigravityModel  string `json:"antigravity_model"`
 	AntigravityEffort string `json:"antigravity_effort"`
@@ -47,6 +53,8 @@ func DefaultConfig() Config {
 		Language: DefaultLanguage,
 		Summarizer: SummarizerConfig{
 			Provider:          DefaultProvider,
+			GeminiModel:       DefaultGeminiModel,
+			AnthropicModel:    DefaultAnthropicModel,
 			ClaudeModel:       DefaultClaudeModel,
 			AntigravityModel:  DefaultAntigravityModel,
 			AntigravityEffort: DefaultAntigravityEffort,
@@ -85,6 +93,22 @@ func LoadFromFile(filePath string) (Config, error) {
 	}
 	if env := os.Getenv("MEMREMARK_SUMMARIZER_PROVIDER"); env != "" {
 		cfg.Summarizer.Provider = env
+	}
+	if env := os.Getenv("MEMREMARK_GEMINI_API_KEY"); env != "" {
+		cfg.Summarizer.GeminiAPIKey = env
+	} else if env := os.Getenv("GEMINI_API_KEY"); env != "" {
+		cfg.Summarizer.GeminiAPIKey = env
+	}
+	if env := os.Getenv("MEMREMARK_GEMINI_MODEL"); env != "" {
+		cfg.Summarizer.GeminiModel = env
+	}
+	if env := os.Getenv("MEMREMARK_ANTHROPIC_API_KEY"); env != "" {
+		cfg.Summarizer.AnthropicAPIKey = env
+	} else if env := os.Getenv("ANTHROPIC_API_KEY"); env != "" {
+		cfg.Summarizer.AnthropicAPIKey = env
+	}
+	if env := os.Getenv("MEMREMARK_ANTHROPIC_MODEL"); env != "" {
+		cfg.Summarizer.AnthropicModel = env
 	}
 	if env := os.Getenv("MEMREMARK_CLAUDE_MODEL"); env != "" {
 		cfg.Summarizer.ClaudeModel = env
