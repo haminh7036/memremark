@@ -39,14 +39,14 @@ func (s *Store) InsertVerbatimDrawer(wingID int64, sessionID, toolName, content 
 }
 
 // InsertSummaryDrawer records one distilled summary for a wing.
-func (s *Store) InsertSummaryDrawer(wingID int64, sessionID, hall, content string, coversFrom, coversTo, createdAt time.Time) error {
+func (s *Store) InsertSummaryDrawer(wingID int64, sessionID, hall, content, narrative string, coversFrom, coversTo, createdAt time.Time) error {
 	if !IsValidHall(hall) {
 		return fmt.Errorf("storage: invalid hall %q", hall)
 	}
 	_, err := s.db.Exec(
-		`INSERT INTO drawers (wing_id, type, hall, content, session_id, covers_from, covers_to, created_at)
-		 VALUES (?, 'summary', ?, ?, ?, ?, ?, ?)`,
-		wingID, hall, content, sessionID, coversFrom.Unix(), coversTo.Unix(), createdAt.Unix(),
+		`INSERT INTO drawers (wing_id, type, hall, content, narrative, session_id, covers_from, covers_to, created_at)
+		 VALUES (?, 'summary', ?, ?, ?, ?, ?, ?, ?)`,
+		wingID, hall, content, narrative, sessionID, coversFrom.Unix(), coversTo.Unix(), createdAt.Unix(),
 	)
 	if err != nil {
 		return fmt.Errorf("storage: insert summary drawer: %w", err)
@@ -63,6 +63,7 @@ type Drawer struct {
 	Hall       string
 	ToolName   string
 	Content    string
+	Narrative  string
 	SessionID  string
 	CoversFrom int64
 	CoversTo   int64
@@ -78,13 +79,14 @@ func whereClause(conditions []string) string {
 	return "WHERE " + strings.Join(conditions, " AND ")
 }
 
-// scanDrawerRows reads every row of an `id, wing_id, type, hall, content, tool_name,
+// scanDrawerRows reads every row of an `id, wing_id, type, hall, content, narrative, tool_name,
 // session_id, covers_from, covers_to, created_at` result set into Drawers. Shared by
-// SearchDrawers and GetTimeline, which select those same columns in that same order.
+// SearchDrawers, GetTimeline, and GetDrawersBySession, which select those same columns in that same order.
 func scanDrawerRows(rows *sql.Rows) ([]Drawer, error) {
 	var out []Drawer
 	for rows.Next() {
 		var d Drawer
+		var narrative sql.NullString
 		var toolName sql.NullString
 		var coversFrom sql.NullInt64
 		var coversTo sql.NullInt64
@@ -95,6 +97,7 @@ func scanDrawerRows(rows *sql.Rows) ([]Drawer, error) {
 			&d.Type,
 			&d.Hall,
 			&d.Content,
+			&narrative,
 			&toolName,
 			&d.SessionID,
 			&coversFrom,
@@ -103,6 +106,7 @@ func scanDrawerRows(rows *sql.Rows) ([]Drawer, error) {
 		); err != nil {
 			return nil, fmt.Errorf("storage: scan drawer row: %w", err)
 		}
+		d.Narrative = narrative.String
 		d.ToolName = toolName.String
 		if coversFrom.Valid {
 			d.CoversFrom = coversFrom.Int64
@@ -120,7 +124,7 @@ func scanDrawerRows(rows *sql.Rows) ([]Drawer, error) {
 // recent first.
 func (s *Store) RecentSummaries(wingID int64, limit int) ([]Drawer, error) {
 	rows, err := s.db.Query(
-		`SELECT id, hall, content, created_at FROM drawers
+		`SELECT id, hall, content, narrative, created_at FROM drawers
 		 WHERE wing_id = ? AND type = 'summary'
 		 ORDER BY created_at DESC, id DESC LIMIT ?`,
 		wingID, limit,
@@ -133,10 +137,12 @@ func (s *Store) RecentSummaries(wingID int64, limit int) ([]Drawer, error) {
 	var out []Drawer
 	for rows.Next() {
 		var d Drawer
+		var narrative sql.NullString
 		var createdAt int64
-		if err := rows.Scan(&d.ID, &d.Hall, &d.Content, &createdAt); err != nil {
+		if err := rows.Scan(&d.ID, &d.Hall, &d.Content, &narrative, &createdAt); err != nil {
 			return nil, fmt.Errorf("storage: scan summary row: %w", err)
 		}
+		d.Narrative = narrative.String
 		d.CreatedAt = time.Unix(createdAt, 0)
 		out = append(out, d)
 	}
@@ -230,7 +236,7 @@ func (s *Store) SearchDrawers(wingID int64, query, hall, drawerType string, limi
 	}
 
 	querySQL := fmt.Sprintf(
-		`SELECT id, wing_id, type, hall, content, tool_name, session_id, covers_from, covers_to, created_at FROM drawers
+		`SELECT id, wing_id, type, hall, content, narrative, tool_name, session_id, covers_from, covers_to, created_at FROM drawers
 		 %s
 		 ORDER BY created_at DESC, id DESC LIMIT ?`,
 		whereClause(conditions),
@@ -291,7 +297,7 @@ func (s *Store) GetTimeline(wingID int64, sessionID string, since time.Time, lim
 	}
 
 	querySQL := fmt.Sprintf(
-		`SELECT id, wing_id, type, hall, content, tool_name, session_id, covers_from, covers_to, created_at FROM drawers
+		`SELECT id, wing_id, type, hall, content, narrative, tool_name, session_id, covers_from, covers_to, created_at FROM drawers
 		 %s
 		 ORDER BY created_at ASC, id ASC LIMIT ?`,
 		whereClause(conditions),
@@ -301,6 +307,40 @@ func (s *Store) GetTimeline(wingID int64, sessionID string, since time.Time, lim
 	rows, err := s.db.Query(querySQL, args...)
 	if err != nil {
 		return nil, fmt.Errorf("storage: get timeline: %w", err)
+	}
+	defer rows.Close()
+
+	return scanDrawerRows(rows)
+}
+
+// GetDrawersBySession retrieves all drawers for a wing and session, optionally filtered by type ('verbatim' or 'summary'), ordered chronologically.
+func (s *Store) GetDrawersBySession(wingID int64, sessionID string, drawerType string) ([]Drawer, error) {
+	var conditions []string
+	var args []interface{}
+
+	if wingID > 0 {
+		conditions = append(conditions, "wing_id = ?")
+		args = append(args, wingID)
+	}
+	if sessionID != "" {
+		conditions = append(conditions, "session_id = ?")
+		args = append(args, sessionID)
+	}
+	if drawerType == "summary" || drawerType == "verbatim" {
+		conditions = append(conditions, "type = ?")
+		args = append(args, drawerType)
+	}
+
+	querySQL := fmt.Sprintf(
+		`SELECT id, wing_id, type, hall, content, narrative, tool_name, session_id, covers_from, covers_to, created_at FROM drawers
+		 %s
+		 ORDER BY created_at ASC, id ASC`,
+		whereClause(conditions),
+	)
+
+	rows, err := s.db.Query(querySQL, args...)
+	if err != nil {
+		return nil, fmt.Errorf("storage: get drawers by session: %w", err)
 	}
 	defer rows.Close()
 

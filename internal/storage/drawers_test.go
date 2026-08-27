@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"database/sql"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -23,10 +24,10 @@ func TestInsertVerbatimAndSummaryDrawers(t *testing.T) {
 	if err := s.InsertVerbatimDrawer(wingID, "session-1", "Read", "read foo.txt", now); err != nil {
 		t.Fatalf("InsertVerbatimDrawer: %v", err)
 	}
-	if err := s.InsertSummaryDrawer(wingID, "session-1", HallFact, "decided to use SQLite", now.Add(-time.Hour), now, now); err != nil {
+	if err := s.InsertSummaryDrawer(wingID, "session-1", HallFact, "decided to use SQLite", "", now.Add(-time.Hour), now, now); err != nil {
 		t.Fatalf("InsertSummaryDrawer: %v", err)
 	}
-	if err := s.InsertSummaryDrawer(wingID, "session-1", "not-a-real-hall", "x", now, now, now); err == nil {
+	if err := s.InsertSummaryDrawer(wingID, "session-1", "not-a-real-hall", "x", "", now, now, now); err == nil {
 		t.Fatalf("expected error for invalid hall, got nil")
 	}
 
@@ -53,10 +54,10 @@ func TestRecentSummariesOrdersNewestFirst(t *testing.T) {
 	older := time.Now().Add(-2 * time.Hour)
 	newer := time.Now()
 
-	if err := s.InsertSummaryDrawer(wingID, "s1", HallFact, "older fact", older, older, older); err != nil {
+	if err := s.InsertSummaryDrawer(wingID, "s1", HallFact, "older fact", "", older, older, older); err != nil {
 		t.Fatalf("insert older: %v", err)
 	}
-	if err := s.InsertSummaryDrawer(wingID, "s1", HallFact, "newer fact", newer, newer, newer); err != nil {
+	if err := s.InsertSummaryDrawer(wingID, "s1", HallFact, "newer fact", "", newer, newer, newer); err != nil {
 		t.Fatalf("insert newer: %v", err)
 	}
 
@@ -86,7 +87,7 @@ func TestRecentSummariesOrdersByIDWhenCreatedAtTies(t *testing.T) {
 
 	contents := []string{"first", "second", "third", "fourth"}
 	for _, c := range contents {
-		if err := s.InsertSummaryDrawer(wingID, "s1", HallFact, c, sameInstant, sameInstant, sameInstant); err != nil {
+		if err := s.InsertSummaryDrawer(wingID, "s1", HallFact, c, "", sameInstant, sameInstant, sameInstant); err != nil {
 			t.Fatalf("insert %q: %v", c, err)
 		}
 	}
@@ -162,10 +163,10 @@ func TestLastSummaryCoversToReturnsMostRecentCoversTo(t *testing.T) {
 	wingID, _ := s.GetOrCreateWing("/tmp/project")
 	first := time.Now().Add(-time.Hour).Truncate(time.Second)
 	second := time.Now().Truncate(time.Second)
-	if err := s.InsertSummaryDrawer(wingID, "s1", HallFact, "a", first, first, first); err != nil {
+	if err := s.InsertSummaryDrawer(wingID, "s1", HallFact, "a", "", first, first, first); err != nil {
 		t.Fatalf("insert 1: %v", err)
 	}
-	if err := s.InsertSummaryDrawer(wingID, "s1", HallFact, "b", second, second, second); err != nil {
+	if err := s.InsertSummaryDrawer(wingID, "s1", HallFact, "b", "", second, second, second); err != nil {
 		t.Fatalf("insert 2: %v", err)
 	}
 
@@ -198,7 +199,7 @@ func TestLastSummaryCoversToUsesEventTimeNotInsertionWallClock(t *testing.T) {
 
 	coversTo := time.Now().Add(-time.Hour).Truncate(time.Second)  // last real event-time distilled
 	insertedAt := time.Now().Truncate(time.Second)                // daemon's wall clock when it wrote the summary, much later
-	if err := s.InsertSummaryDrawer(wingID, "s1", HallFact, "a", coversTo, coversTo, insertedAt); err != nil {
+	if err := s.InsertSummaryDrawer(wingID, "s1", HallFact, "a", "", coversTo, coversTo, insertedAt); err != nil {
 		t.Fatalf("insert summary: %v", err)
 	}
 
@@ -239,8 +240,8 @@ func TestStore_SearchDrawers_Filters(t *testing.T) {
 	coversFrom := now.Add(-time.Hour).Truncate(time.Second)
 	coversTo := now.Truncate(time.Second)
 
-	_ = store.InsertSummaryDrawer(wingID, "s1", HallFact, "Fact about golang compiler", coversFrom, coversTo, now)
-	_ = store.InsertSummaryDrawer(wingID, "s1", HallAdvice, "Advice on memory management", coversFrom, coversTo, now.Add(time.Second))
+	_ = store.InsertSummaryDrawer(wingID, "s1", HallFact, "Fact about golang compiler", "", coversFrom, coversTo, now)
+	_ = store.InsertSummaryDrawer(wingID, "s1", HallAdvice, "Advice on memory management", "", coversFrom, coversTo, now.Add(time.Second))
 	_ = store.InsertVerbatimDrawer(wingID, "s2", "Bash", "go build -o test", now.Add(2*time.Second))
 
 	// Search by query and verify fields
@@ -310,7 +311,7 @@ func TestStore_SearchDrawers_SpecialChars(t *testing.T) {
 	wingID, _ := store.GetOrCreateWing("/test/ws_special")
 	now := time.Now().Truncate(time.Second)
 
-	_ = store.InsertSummaryDrawer(wingID, "s1", HallDiscovery, "Tiết kiệm 50% CPU với 'O'Reilly' optimization_v2", now, now, now)
+	_ = store.InsertSummaryDrawer(wingID, "s1", HallDiscovery, "Tiết kiệm 50% CPU với 'O'Reilly' optimization_v2", "", now, now, now)
 
 	// Search with %, _, and quotes
 	for _, q := range []string{"50%", "O'Reilly", "optimization_v2", "Tiết kiệm"} {
@@ -366,7 +367,7 @@ func TestStore_GetTimeline_Ordering(t *testing.T) {
 
 	_ = store.InsertVerbatimDrawer(wingID, "session-1", "Bash", "event 1", baseTime.Add(10*time.Second))
 	_ = store.InsertVerbatimDrawer(wingID, "session-1", "ViewFile", "event 2", baseTime.Add(20*time.Second))
-	_ = store.InsertSummaryDrawer(wingID, "session-1", HallFact, "summary 1", baseTime.Add(10*time.Second), baseTime.Add(20*time.Second), baseTime.Add(30*time.Second))
+	_ = store.InsertSummaryDrawer(wingID, "session-1", HallFact, "summary 1", "", baseTime.Add(10*time.Second), baseTime.Add(20*time.Second), baseTime.Add(30*time.Second))
 	_ = store.InsertVerbatimDrawer(wingID, "session-2", "Bash", "other session event", baseTime.Add(15*time.Second))
 
 	// Get timeline for session-1
@@ -507,12 +508,12 @@ func TestStore_ListWingsWithStats(t *testing.T) {
 
 	now := time.Now().Truncate(time.Second)
 	// Wing A: 2 summaries, 1 verbatim
-	_ = store.InsertSummaryDrawer(wA, "s1", HallFact, "Fact A1", now, now, now)
-	_ = store.InsertSummaryDrawer(wA, "s1", HallDiscovery, "Discovery A1", now, now, now)
+	_ = store.InsertSummaryDrawer(wA, "s1", HallFact, "Fact A1", "", now, now, now)
+	_ = store.InsertSummaryDrawer(wA, "s1", HallDiscovery, "Discovery A1", "", now, now, now)
 	_ = store.InsertVerbatimDrawer(wA, "s1", "Read", "cat foo.go", now)
 
 	// Wing B: 1 summary, 2 verbatims
-	_ = store.InsertSummaryDrawer(wB, "s2", HallAdvice, "Advice B1", now, now, now)
+	_ = store.InsertSummaryDrawer(wB, "s2", HallAdvice, "Advice B1", "", now, now, now)
 	_ = store.InsertVerbatimDrawer(wB, "s2", "Bash", "go build", now)
 	_ = store.InsertVerbatimDrawer(wB, "s2", "Edit", "edit bar.go", now)
 
@@ -576,11 +577,11 @@ func TestStore_GetGlobalStats(t *testing.T) {
 	w2, _ := store.GetOrCreateWing("/path/to/proj2")
 	now := time.Now().Truncate(time.Second)
 
-	_ = store.InsertSummaryDrawer(w1, "s1", HallFact, "Fact 1", now, now, now)
-	_ = store.InsertSummaryDrawer(w1, "s1", HallDiscovery, "Discovery 1", now, now, now)
+	_ = store.InsertSummaryDrawer(w1, "s1", HallFact, "Fact 1", "", now, now, now)
+	_ = store.InsertSummaryDrawer(w1, "s1", HallDiscovery, "Discovery 1", "", now, now, now)
 	_ = store.InsertVerbatimDrawer(w1, "s1", "Read", "cat file", now)
 
-	_ = store.InsertSummaryDrawer(w2, "s2", HallAdvice, "Advice 1", now, now, now)
+	_ = store.InsertSummaryDrawer(w2, "s2", HallAdvice, "Advice 1", "", now, now, now)
 	_ = store.InsertVerbatimDrawer(w2, "s2", "Bash", "make test", now)
 
 	stats, err := store.GetGlobalStats()
@@ -641,7 +642,7 @@ func TestStore_OrphanedVerbatimSessions(t *testing.T) {
 		t.Fatalf("InsertVerbatimDrawer: %v", err)
 	}
 	// A session with only a summary row (already fully pruned) must NOT appear.
-	if err := s.InsertSummaryDrawer(wingA, "sess-done", HallFact, "already summarized", now, now, now); err != nil {
+	if err := s.InsertSummaryDrawer(wingA, "sess-done", HallFact, "already summarized", "", now, now, now); err != nil {
 		t.Fatalf("InsertSummaryDrawer: %v", err)
 	}
 
@@ -697,3 +698,144 @@ func TestStore_GetWingByID(t *testing.T) {
 		t.Fatalf("expected error for non-existent wing ID, got %v, err: %v", missing, err)
 	}
 }
+
+func TestDrawer_NarrativePersistence(t *testing.T) {
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	wingID, _ := store.GetOrCreateWing("/home/user/proj")
+	now := time.Now().Truncate(time.Second)
+
+	err := store.InsertSummaryDrawer(wingID, "sess-1", HallFact, "Bullet point fact", "Detailed narrative explaining the fact context", now, now, now)
+	if err != nil {
+		t.Fatalf("InsertSummaryDrawer failed: %v", err)
+	}
+
+	drawers, err := store.RecentSummaries(wingID, 10)
+	if err != nil {
+		t.Fatalf("RecentSummaries failed: %v", err)
+	}
+	if len(drawers) != 1 {
+		t.Fatalf("expected 1 drawer, got %d", len(drawers))
+	}
+	if drawers[0].Narrative != "Detailed narrative explaining the fact context" {
+		t.Errorf("expected narrative, got %q", drawers[0].Narrative)
+	}
+}
+
+func TestDrawer_GetDrawersBySession(t *testing.T) {
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	wingID, _ := store.GetOrCreateWing("/home/user/proj")
+	now := time.Now().Truncate(time.Second)
+
+	_ = store.InsertVerbatimDrawer(wingID, "sess-target", "Read", "read foo.txt", now.Add(-10*time.Minute))
+	_ = store.InsertSummaryDrawer(wingID, "sess-target", HallFact, "Fact 1", "Narrative 1", now.Add(-5*time.Minute), now.Add(-5*time.Minute), now.Add(-5*time.Minute))
+	_ = store.InsertSummaryDrawer(wingID, "sess-other", HallFact, "Other fact", "Other narrative", now, now, now)
+
+	allDrawers, err := store.GetDrawersBySession(wingID, "sess-target", "")
+	if err != nil {
+		t.Fatalf("GetDrawersBySession (all) failed: %v", err)
+	}
+	if len(allDrawers) != 2 {
+		t.Fatalf("expected 2 drawers for sess-target, got %d", len(allDrawers))
+	}
+	// Chronological order
+	if allDrawers[0].Type != "verbatim" || allDrawers[1].Type != "summary" {
+		t.Errorf("expected verbatim then summary, got %s then %s", allDrawers[0].Type, allDrawers[1].Type)
+	}
+	if allDrawers[1].Narrative != "Narrative 1" {
+		t.Errorf("expected summary narrative 'Narrative 1', got %q", allDrawers[1].Narrative)
+	}
+
+	summaryOnly, err := store.GetDrawersBySession(wingID, "sess-target", "summary")
+	if err != nil {
+		t.Fatalf("GetDrawersBySession (summary) failed: %v", err)
+	}
+	if len(summaryOnly) != 1 {
+		t.Fatalf("expected 1 summary drawer, got %d", len(summaryOnly))
+	}
+	if summaryOnly[0].Content != "Fact 1" {
+		t.Errorf("expected 'Fact 1', got %q", summaryOnly[0].Content)
+	}
+}
+
+func TestMigration_DrawersNarrativeColumn(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "legacy.db")
+
+	// Setup legacy DB without narrative column in drawers table
+	legacyDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("sql.Open legacy: %v", err)
+	}
+	legacySchema := `
+	CREATE TABLE wings (
+		id INTEGER PRIMARY KEY,
+		path TEXT UNIQUE NOT NULL,
+		name TEXT NOT NULL,
+		created_at INTEGER NOT NULL
+	);
+	CREATE TABLE drawers (
+		id INTEGER PRIMARY KEY,
+		wing_id INTEGER NOT NULL REFERENCES wings(id),
+		type TEXT NOT NULL CHECK (type IN ('verbatim','summary')),
+		hall TEXT NOT NULL CHECK (hall IN ('event','fact','discovery','preference','advice')),
+		content TEXT NOT NULL,
+		tool_name TEXT,
+		session_id TEXT NOT NULL,
+		covers_from INTEGER,
+		covers_to INTEGER,
+		created_at INTEGER NOT NULL
+	);
+	`
+	if _, err := legacyDB.Exec(legacySchema); err != nil {
+		t.Fatalf("exec legacy schema: %v", err)
+	}
+	now := time.Now().Truncate(time.Second)
+	if _, err := legacyDB.Exec(`INSERT INTO wings (id, path, name, created_at) VALUES (1, '/home/user/proj', 'proj', ?)`, now.Unix()); err != nil {
+		t.Fatalf("insert legacy wing: %v", err)
+	}
+	if _, err := legacyDB.Exec(`
+		INSERT INTO drawers (id, wing_id, type, hall, content, session_id, created_at)
+		VALUES (1, 1, 'summary', 'fact', 'legacy content', 'sess-legacy', ?)`, now.Unix()); err != nil {
+		t.Fatalf("insert legacy drawer: %v", err)
+	}
+	legacyDB.Close()
+
+	// Open with store - migration should run seamlessly
+	store, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open store with legacy DB: %v", err)
+	}
+	defer store.Close()
+
+	// Read existing legacy drawer
+	drawers, err := store.RecentSummaries(1, 10)
+	if err != nil {
+		t.Fatalf("RecentSummaries after migration failed: %v", err)
+	}
+	if len(drawers) != 1 {
+		t.Fatalf("expected 1 drawer, got %d", len(drawers))
+	}
+	if drawers[0].Content != "legacy content" || drawers[0].Narrative != "" {
+		t.Errorf("legacy drawer mismatch: content=%q, narrative=%q", drawers[0].Content, drawers[0].Narrative)
+	}
+
+	// Insert new summary with narrative
+	if err := store.InsertSummaryDrawer(1, "sess-new", HallFact, "new fact", "new narrative", now, now, now); err != nil {
+		t.Fatalf("InsertSummaryDrawer with narrative failed after migration: %v", err)
+	}
+
+	drawers2, err := store.RecentSummaries(1, 10)
+	if err != nil {
+		t.Fatalf("RecentSummaries failed: %v", err)
+	}
+	if len(drawers2) != 2 {
+		t.Fatalf("expected 2 drawers, got %d", len(drawers2))
+	}
+	if drawers2[0].Narrative != "new narrative" {
+		t.Errorf("expected new drawer narrative 'new narrative', got %q", drawers2[0].Narrative)
+	}
+}
+

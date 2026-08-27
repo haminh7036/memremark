@@ -28,10 +28,10 @@ func TestGetSummaries(t *testing.T) {
 	coversFrom := now.Add(-time.Hour)
 	coversTo := now.Add(-time.Minute)
 
-	if err := store.InsertSummaryDrawer(wingID, "session-1", "fact", "Go 1.26 is the minimum version", coversFrom, coversTo, now); err != nil {
+	if err := store.InsertSummaryDrawer(wingID, "session-1", "fact", "Go 1.26 is the minimum version", "", coversFrom, coversTo, now); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.InsertSummaryDrawer(wingID, "session-1", "discovery", "SQLite WAL mode is needed for concurrent reads", coversFrom, coversTo, now); err != nil {
+	if err := store.InsertSummaryDrawer(wingID, "session-1", "discovery", "SQLite WAL mode is needed for concurrent reads", "", coversFrom, coversTo, now); err != nil {
 		t.Fatal(err)
 	}
 

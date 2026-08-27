@@ -66,10 +66,10 @@ func TestAPI_Wings_WithData(t *testing.T) {
 	}
 
 	now := time.Now()
-	_ = store.InsertSummaryDrawer(w1, "s1", storage.HallFact, "Fact A", now, now, now)
-	_ = store.InsertSummaryDrawer(w1, "s1", storage.HallDiscovery, "Discovery A", now, now, now)
+	_ = store.InsertSummaryDrawer(w1, "s1", storage.HallFact, "Fact A", "", now, now, now)
+	_ = store.InsertSummaryDrawer(w1, "s1", storage.HallDiscovery, "Discovery A", "", now, now, now)
 	_ = store.InsertVerbatimDrawer(w1, "s1", "tool_read", "read something", now)
-	_ = store.InsertSummaryDrawer(w2, "s2", storage.HallAdvice, "Advice B", now, now, now)
+	_ = store.InsertSummaryDrawer(w2, "s2", storage.HallAdvice, "Advice B", "", now, now, now)
 
 	assets, err := Assets()
 	if err != nil {
@@ -132,10 +132,10 @@ func TestAPI_Timeline_Filters(t *testing.T) {
 	w2, _ := store.GetOrCreateWing("/projects/proj-b")
 
 	now := time.Now()
-	_ = store.InsertSummaryDrawer(w1, "s1", storage.HallFact, "Database password is xyz", now, now, now)
-	_ = store.InsertSummaryDrawer(w1, "s1", storage.HallDiscovery, "Found performance bottleneck in query", now, now, now)
+	_ = store.InsertSummaryDrawer(w1, "s1", storage.HallFact, "Database password is xyz", "", now, now, now)
+	_ = store.InsertSummaryDrawer(w1, "s1", storage.HallDiscovery, "Found performance bottleneck in query", "", now, now, now)
 	_ = store.InsertVerbatimDrawer(w1, "s1", "exec_cmd", "running tests", now)
-	_ = store.InsertSummaryDrawer(w2, "s2", storage.HallDiscovery, "Found redis memory leak", now, now, now)
+	_ = store.InsertSummaryDrawer(w2, "s2", storage.HallDiscovery, "Found redis memory leak", "", now, now, now)
 
 	assets, err := Assets()
 	if err != nil {
@@ -192,7 +192,7 @@ func TestAPI_Timeline_AllWorkspacesPreservesWingID(t *testing.T) {
 	coversFrom := now.Add(-time.Hour).Truncate(time.Second)
 	coversTo := now.Truncate(time.Second)
 
-	_ = store.InsertSummaryDrawer(w1, "session-1", storage.HallFact, "Fact on proj A", coversFrom, coversTo, now)
+	_ = store.InsertSummaryDrawer(w1, "session-1", storage.HallFact, "Fact on proj A", "", coversFrom, coversTo, now)
 	_ = store.InsertVerbatimDrawer(w2, "session-2", "Bash", "ls -la on proj B", now.Add(time.Second))
 
 	assets, err := Assets()
@@ -233,8 +233,8 @@ func TestAPI_Stats(t *testing.T) {
 
 	w1, _ := store.GetOrCreateWing("/projects/proj-a")
 	now := time.Now()
-	_ = store.InsertSummaryDrawer(w1, "s1", storage.HallFact, "Fact 1", now, now, now)
-	_ = store.InsertSummaryDrawer(w1, "s1", storage.HallDiscovery, "Discovery 1", now, now, now)
+	_ = store.InsertSummaryDrawer(w1, "s1", storage.HallFact, "Fact 1", "", now, now, now)
+	_ = store.InsertSummaryDrawer(w1, "s1", storage.HallDiscovery, "Discovery 1", "", now, now, now)
 	_ = store.InsertVerbatimDrawer(w1, "s1", "tool_read", "content 1", now)
 
 	assets, err := Assets()

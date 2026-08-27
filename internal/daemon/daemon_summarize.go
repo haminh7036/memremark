@@ -92,7 +92,7 @@ func (d *Daemon) summarizeSessionWithBatchSize(ctx context.Context, sessionID st
 		coversFrom := batch[0].CreatedAt
 		coversTo := batch[len(batch)-1].CreatedAt
 		for _, item := range items {
-			if err := d.Store.InsertSummaryDrawer(wingID, sessionID, item.Hall, item.Content, coversFrom, coversTo, now); err != nil {
+			if err := d.Store.InsertSummaryDrawer(wingID, sessionID, item.Hall, item.Content, "", coversFrom, coversTo, now); err != nil {
 				return err
 			}
 		}

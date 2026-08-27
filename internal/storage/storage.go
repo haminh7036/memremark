@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS drawers (
 	type TEXT NOT NULL CHECK (type IN ('verbatim','summary')),
 	hall TEXT NOT NULL CHECK (hall IN ('event','fact','discovery','preference','advice')),
 	content TEXT NOT NULL,
+	narrative TEXT,
 	tool_name TEXT,
 	session_id TEXT NOT NULL,
 	covers_from INTEGER,
@@ -32,6 +33,21 @@ CREATE TABLE IF NOT EXISTS drawers (
 
 CREATE INDEX IF NOT EXISTS idx_drawers_wing_type_created ON drawers(wing_id, type, created_at);
 CREATE INDEX IF NOT EXISTS idx_drawers_wing_session_type ON drawers(wing_id, session_id, type, created_at);
+
+CREATE TABLE IF NOT EXISTS session_digests (
+	id INTEGER PRIMARY KEY,
+	wing_id INTEGER NOT NULL REFERENCES wings(id),
+	session_id TEXT UNIQUE NOT NULL,
+	request TEXT NOT NULL,
+	investigated TEXT NOT NULL,
+	learned TEXT NOT NULL,
+	completed TEXT NOT NULL,
+	next_steps TEXT NOT NULL,
+	notes TEXT NOT NULL,
+	created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_digests_wing_created ON session_digests(wing_id, created_at);
 
 CREATE TABLE IF NOT EXISTS poll_state (
 	key TEXT PRIMARY KEY,
@@ -95,6 +111,11 @@ func Open(path string) (*Store, error) {
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("storage: apply schema: %w", err)
+	}
+	// Migrate drawers table to add narrative column if missing in legacy DBs
+	if err := migrateNarrativeColumn(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("storage: migrate narrative column: %w", err)
 	}
 	// Migrate any legacy URI or unnormalized paths in the wings table
 	if err := migrateLegacyWings(db); err != nil {
@@ -160,6 +181,39 @@ func migrateLegacyWings(db *sql.DB) error {
 			}
 		} else {
 			return fmt.Errorf("check existing wing for %s: %w", f.cleanPath, err)
+		}
+	}
+	return nil
+}
+
+// migrateNarrativeColumn ensures the drawers table has the narrative column.
+func migrateNarrativeColumn(db *sql.DB) error {
+	rows, err := db.Query("PRAGMA table_info(drawers);")
+	if err != nil {
+		return fmt.Errorf("pragma table_info drawers: %w", err)
+	}
+	defer rows.Close()
+
+	hasNarrative := false
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull, pk int
+		var dfltValue sql.NullString
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dfltValue, &pk); err != nil {
+			return fmt.Errorf("scan drawers column: %w", err)
+		}
+		if name == "narrative" {
+			hasNarrative = true
+			break
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if !hasNarrative {
+		if _, err := db.Exec("ALTER TABLE drawers ADD COLUMN narrative TEXT;"); err != nil {
+			return fmt.Errorf("add narrative column to drawers: %w", err)
 		}
 	}
 	return nil
