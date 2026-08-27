@@ -196,6 +196,19 @@ func (s *Server) handleToolsList(req *Request) error {
 			},
 		},
 		{
+			Name:        "get_session_digest",
+			Description: "Retrieve a synthesized macro session digest (request, investigated, learned, completed, next_steps, notes) for a specific session ID or list recent digests for a workspace.",
+			InputSchema: InputSchema{
+				Type: "object",
+				Properties: map[string]Property{
+					"session_id": {Type: "string", Description: "Session ID to retrieve the digest for."},
+					"wing_path":  {Type: "string", Description: "Workspace path. Defaults to current directory."},
+					"regenerate": {Type: "boolean", Description: "If true, requests synthesis if summarizer is available."},
+				},
+				AdditionalProperties: false,
+			},
+		},
+		{
 			Name:        "forget_memory",
 			Description: "Delete an outdated or incorrect memory drawer by its ID.",
 			InputSchema: InputSchema{
@@ -242,6 +255,8 @@ func (s *Server) handleToolsCall(ctx context.Context, req *Request) error {
 		result = s.callRemember(callParams.Arguments)
 	case "get_timeline":
 		result = s.callGetTimeline(callParams.Arguments)
+	case "get_session_digest":
+		result = s.callGetSessionDigest(callParams.Arguments)
 	case "forget_memory":
 		result = s.callForgetMemory(callParams.Arguments)
 	default:
@@ -297,7 +312,11 @@ func (s *Server) callSearchMemory(args map[string]interface{}) ToolCallResult {
 		if d.ToolName != "" {
 			fmt.Fprintf(&sb, "- [ID: %d] [%s:%s] %s (%s)\n", d.ID, d.Hall, d.ToolName, d.Content, d.CreatedAt.Format("2006-01-02 15:04:05"))
 		} else {
-			fmt.Fprintf(&sb, "- [ID: %d] [%s] %s (%s)\n", d.ID, d.Hall, d.Content, d.CreatedAt.Format("2006-01-02 15:04:05"))
+			if d.Narrative != "" {
+				fmt.Fprintf(&sb, "- [ID: %d] [%s] %s (%s)\n  Narrative: %s\n", d.ID, d.Hall, d.Content, d.CreatedAt.Format("2006-01-02 15:04:05"), d.Narrative)
+			} else {
+				fmt.Fprintf(&sb, "- [ID: %d] [%s] %s (%s)\n", d.ID, d.Hall, d.Content, d.CreatedAt.Format("2006-01-02 15:04:05"))
+			}
 		}
 	}
 
@@ -337,6 +356,7 @@ func (s *Server) callRemember(args map[string]interface{}) ToolCallResult {
 
 func (s *Server) callGetTimeline(args map[string]interface{}) ToolCallResult {
 	sessionID, _ := args["session_id"].(string)
+	sessionID = strings.TrimSpace(sessionID)
 	wingPath, _ := args["wing_path"].(string)
 	limit := 20
 	if l, ok := args["limit"].(float64); ok && int(l) > 0 {
@@ -363,18 +383,127 @@ func (s *Server) callGetTimeline(args map[string]interface{}) ToolCallResult {
 	}
 
 	var sb bytes.Buffer
+	if sessionID != "" {
+		if digest, err := s.store.GetSessionDigest(sessionID); err == nil && digest != nil {
+			fmt.Fprintf(&sb, "Session Digest [%s]:\n", sessionID)
+			if digest.Request != "" {
+				fmt.Fprintf(&sb, "- Request: %s\n", digest.Request)
+			}
+			if digest.Investigated != "" {
+				fmt.Fprintf(&sb, "- Investigated: %s\n", digest.Investigated)
+			}
+			if digest.Learned != "" {
+				fmt.Fprintf(&sb, "- Learned: %s\n", digest.Learned)
+			}
+			if digest.Completed != "" {
+				fmt.Fprintf(&sb, "- Completed: %s\n", digest.Completed)
+			}
+			if digest.NextSteps != "" {
+				fmt.Fprintf(&sb, "- Next Steps: %s\n", digest.NextSteps)
+			}
+			if digest.Notes != "" {
+				fmt.Fprintf(&sb, "- Notes: %s\n", digest.Notes)
+			}
+			fmt.Fprintln(&sb)
+		}
+	}
 	fmt.Fprintf(&sb, "Timeline for wing %q (%d events):\n", cleanPath, len(timeline))
 	for i, d := range timeline {
 		timeStr := d.CreatedAt.Format("15:04:05")
 		if d.ToolName != "" {
 			fmt.Fprintf(&sb, "%d. [%s] [verbatim:%s] %s\n", i+1, timeStr, d.ToolName, d.Content)
 		} else {
-			fmt.Fprintf(&sb, "%d. [%s] [summary:%s] %s\n", i+1, timeStr, d.Hall, d.Content)
+			if d.Narrative != "" {
+				fmt.Fprintf(&sb, "%d. [%s] [summary:%s] %s\n   Narrative: %s\n", i+1, timeStr, d.Hall, d.Content, d.Narrative)
+			} else {
+				fmt.Fprintf(&sb, "%d. [%s] [summary:%s] %s\n", i+1, timeStr, d.Hall, d.Content)
+			}
 		}
 	}
 
 	return ToolCallResult{Content: []ToolCallContent{{Type: "text", Text: sb.String()}}}
 }
+
+func (s *Server) callGetSessionDigest(args map[string]interface{}) ToolCallResult {
+	sessionID, _ := args["session_id"].(string)
+	sessionID = strings.TrimSpace(sessionID)
+	wingPath, _ := args["wing_path"].(string)
+
+	if sessionID != "" {
+		digest, err := s.store.GetSessionDigest(sessionID)
+		if err != nil {
+			return ToolCallResult{IsError: true, Content: []ToolCallContent{{Type: "text", Text: fmt.Sprintf("Failed to get session digest: %v", err)}}}
+		}
+		if digest == nil {
+			return ToolCallResult{Content: []ToolCallContent{{Type: "text", Text: fmt.Sprintf("No session digest found for session %q.", sessionID)}}}
+		}
+
+		var sb bytes.Buffer
+		fmt.Fprintf(&sb, "Session Digest for session %q:\n", digest.SessionID)
+		if digest.Request != "" {
+			fmt.Fprintf(&sb, "- Request: %s\n", digest.Request)
+		}
+		if digest.Investigated != "" {
+			fmt.Fprintf(&sb, "- Investigated: %s\n", digest.Investigated)
+		}
+		if digest.Learned != "" {
+			fmt.Fprintf(&sb, "- Learned: %s\n", digest.Learned)
+		}
+		if digest.Completed != "" {
+			fmt.Fprintf(&sb, "- Completed: %s\n", digest.Completed)
+		}
+		if digest.NextSteps != "" {
+			fmt.Fprintf(&sb, "- Next Steps: %s\n", digest.NextSteps)
+		}
+		if digest.Notes != "" {
+			fmt.Fprintf(&sb, "- Notes: %s\n", digest.Notes)
+		}
+
+		return ToolCallResult{Content: []ToolCallContent{{Type: "text", Text: sb.String()}}}
+	}
+
+	cleanPath := normalizePath(wingPath)
+	wingID, err := s.store.GetOrCreateWing(cleanPath)
+	if err != nil {
+		return ToolCallResult{IsError: true, Content: []ToolCallContent{{Type: "text", Text: fmt.Sprintf("Failed to resolve wing: %v", err)}}}
+	}
+
+	digests, err := s.store.ListSessionDigests(wingID, 10)
+	if err != nil {
+		return ToolCallResult{IsError: true, Content: []ToolCallContent{{Type: "text", Text: fmt.Sprintf("Failed to list session digests: %v", err)}}}
+	}
+
+	if len(digests) == 0 {
+		return ToolCallResult{Content: []ToolCallContent{{Type: "text", Text: fmt.Sprintf("No session digests found for wing %q.", cleanPath)}}}
+	}
+
+	var sb bytes.Buffer
+	fmt.Fprintf(&sb, "Found %d session digests for wing %q:\n", len(digests), cleanPath)
+	for i, d := range digests {
+		fmt.Fprintf(&sb, "%d. [Session: %s] (%s)\n", i+1, d.SessionID, d.CreatedAt.Format("2006-01-02 15:04:05"))
+		if d.Request != "" {
+			fmt.Fprintf(&sb, "   - Request: %s\n", d.Request)
+		}
+		if d.Completed != "" {
+			fmt.Fprintf(&sb, "   - Completed: %s\n", d.Completed)
+		}
+		if d.Learned != "" {
+			fmt.Fprintf(&sb, "   - Learned: %s\n", d.Learned)
+		}
+		if d.Investigated != "" {
+			fmt.Fprintf(&sb, "   - Investigated: %s\n", d.Investigated)
+		}
+		if d.NextSteps != "" {
+			fmt.Fprintf(&sb, "   - Next Steps: %s\n", d.NextSteps)
+		}
+		if d.Notes != "" {
+			fmt.Fprintf(&sb, "   - Notes: %s\n", d.Notes)
+		}
+	}
+
+	return ToolCallResult{Content: []ToolCallContent{{Type: "text", Text: sb.String()}}}
+}
+
 
 func (s *Server) callForgetMemory(args map[string]interface{}) ToolCallResult {
 	idVal, ok := args["id"].(float64)

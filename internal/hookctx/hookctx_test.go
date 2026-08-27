@@ -120,3 +120,28 @@ func TestFormatSummariesExactOutput_Localized(t *testing.T) {
 		t.Fatalf("English FormatSummaries mismatch:\ngot:  %q\nwant: %q", gotEn, expectedEn)
 	}
 }
+
+func TestFormatSummaries_PreservesZeroOverheadInvariant_IgnoresNarrative(t *testing.T) {
+	summaries := []storage.Drawer{
+		{
+			Hall:      storage.HallFact,
+			Content:   "Go 1.26 minimum",
+			Narrative: "We migrated to Go 1.26 because of new standard library features and optimizations.",
+		},
+		{
+			Hall:      storage.HallAdvice,
+			Content:   "Always run tests before commit",
+			Narrative: "Running tests prevents CI breakages and maintains high velocity.",
+		},
+	}
+
+	out := FormatSummaries(summaries)
+	expected := "Context from prior sessions (memremark):\n- [fact] Go 1.26 minimum\n- [advice] Always run tests before commit\n"
+	if out != expected {
+		t.Fatalf("FormatSummaries leaked narrative or broke format:\ngot:  %q\nwant: %q", out, expected)
+	}
+	if strings.Contains(out, "migrated to Go 1.26") || strings.Contains(out, "Running tests prevents") {
+		t.Fatalf("FormatSummaries MUST NOT contain narrative prose to preserve 0-token overhead invariant, got %q", out)
+	}
+}
+

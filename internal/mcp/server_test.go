@@ -113,10 +113,39 @@ func TestMCP_ToolsList(t *testing.T) {
 	}
 	resMap := resp.Result.(map[string]interface{})
 	tools := resMap["tools"].([]interface{})
-	if len(tools) != 4 {
-		t.Fatalf("expected 4 tools, got: %d", len(tools))
+	if len(tools) != 5 {
+		t.Fatalf("expected 5 tools, got: %d", len(tools))
+	}
+
+	hasGetSessionDigest := false
+	for _, toolObj := range tools {
+		tMap := toolObj.(map[string]interface{})
+		if tMap["name"] == "get_session_digest" {
+			hasGetSessionDigest = true
+			schema, ok := tMap["inputSchema"].(map[string]interface{})
+			if !ok {
+				t.Fatalf("missing inputSchema for get_session_digest")
+			}
+			props, ok := schema["properties"].(map[string]interface{})
+			if !ok {
+				t.Fatalf("missing properties for get_session_digest")
+			}
+			if _, ok := props["session_id"]; !ok {
+				t.Errorf("expected session_id in properties")
+			}
+			if _, ok := props["wing_path"]; !ok {
+				t.Errorf("expected wing_path in properties")
+			}
+			if _, ok := props["regenerate"]; !ok {
+				t.Errorf("expected regenerate in properties")
+			}
+		}
+	}
+	if !hasGetSessionDigest {
+		t.Fatalf("tools/list missing get_session_digest tool")
 	}
 }
+
 
 func TestMCP_Remember_And_Search(t *testing.T) {
 	s, _, out := setupTestServer(t)
@@ -490,4 +519,205 @@ func TestMCP_EmptyLine(t *testing.T) {
 		t.Fatalf("expected no response on empty line, got: %+v", resp)
 	}
 }
+
+func TestMCP_GetSessionDigest(t *testing.T) {
+	s, store, out := setupTestServer(t)
+	in := &bytes.Buffer{}
+
+	wingPath := "/test/digest-project"
+	wingID, err := store.GetOrCreateWing(wingPath)
+	if err != nil {
+		t.Fatalf("GetOrCreateWing failed: %v", err)
+	}
+
+	digest := storage.SessionDigest{
+		WingID:       wingID,
+		SessionID:    "sess-xyz",
+		Request:      "Refactor auth logic",
+		Investigated: "Checked OAuth2 tokens and session storage",
+		Learned:      "Refresh token rotation prevents stale auth tokens",
+		Completed:    "Implemented token rotation",
+		NextSteps:    "Write integration tests",
+		Notes:        "Security audit passed",
+		CreatedAt:    time.Now().Truncate(time.Second),
+	}
+	if err := store.UpsertSessionDigest(digest); err != nil {
+		t.Fatalf("UpsertSessionDigest failed: %v", err)
+	}
+
+	// 1. Fetch by session_id
+	callReq := `{"jsonrpc":"2.0","id":201,"method":"tools/call","params":{"name":"get_session_digest","arguments":{"session_id":"sess-xyz","wing_path":"/test/digest-project"}}}`
+	resp, err := sendRequest(s, in, out, callReq)
+	if err != nil || resp == nil {
+		t.Fatalf("get_session_digest failed: %v", err)
+	}
+	resMap := resp.Result.(map[string]interface{})
+	if resMap["isError"] == true {
+		t.Fatalf("expected success, got error: %+v", resMap)
+	}
+	contentArr := resMap["content"].([]interface{})
+	firstItem := contentArr[0].(map[string]interface{})
+	text := firstItem["text"].(string)
+
+	if !strings.Contains(text, `sess-xyz`) ||
+		!strings.Contains(text, `Refactor auth logic`) ||
+		!strings.Contains(text, `Checked OAuth2 tokens`) ||
+		!strings.Contains(text, `Refresh token rotation prevents stale auth tokens`) ||
+		!strings.Contains(text, `Implemented token rotation`) ||
+		!strings.Contains(text, `Write integration tests`) ||
+		!strings.Contains(text, `Security audit passed`) {
+		t.Fatalf("digest output missing expected fields, got: %s", text)
+	}
+
+	// 2. Fetch nonexistent session_id
+	callReq2 := `{"jsonrpc":"2.0","id":202,"method":"tools/call","params":{"name":"get_session_digest","arguments":{"session_id":"sess-nonexistent"}}}`
+	resp, err = sendRequest(s, in, out, callReq2)
+	if err != nil || resp == nil {
+		t.Fatalf("get_session_digest nonexistent failed: %v", err)
+	}
+	resMap = resp.Result.(map[string]interface{})
+	contentArr = resMap["content"].([]interface{})
+	firstItem = contentArr[0].(map[string]interface{})
+	if !strings.Contains(firstItem["text"].(string), "No session digest found") {
+		t.Fatalf("expected not found message, got: %v", firstItem["text"])
+	}
+
+	// 3. List digests for wing without specifying session_id
+	callReq3 := `{"jsonrpc":"2.0","id":203,"method":"tools/call","params":{"name":"get_session_digest","arguments":{"wing_path":"/test/digest-project"}}}`
+	resp, err = sendRequest(s, in, out, callReq3)
+	if err != nil || resp == nil {
+		t.Fatalf("get_session_digest list failed: %v", err)
+	}
+	resMap = resp.Result.(map[string]interface{})
+	contentArr = resMap["content"].([]interface{})
+	firstItem = contentArr[0].(map[string]interface{})
+	listText := firstItem["text"].(string)
+	if !strings.Contains(listText, "sess-xyz") || !strings.Contains(listText, "Refactor auth logic") {
+		t.Fatalf("expected list of digests to contain session and request, got: %s", listText)
+	}
+
+	// 4. List digests for empty wing
+	callReq4 := `{"jsonrpc":"2.0","id":204,"method":"tools/call","params":{"name":"get_session_digest","arguments":{"wing_path":"/test/empty-wing"}}}`
+	resp, err = sendRequest(s, in, out, callReq4)
+	if err != nil || resp == nil {
+		t.Fatalf("get_session_digest empty list failed: %v", err)
+	}
+	resMap = resp.Result.(map[string]interface{})
+	contentArr = resMap["content"].([]interface{})
+	firstItem = contentArr[0].(map[string]interface{})
+	if !strings.Contains(firstItem["text"].(string), "No session digests found") {
+		t.Fatalf("expected No session digests found, got: %v", firstItem["text"])
+	}
+}
+
+func TestMCP_SearchMemory_WithNarrative(t *testing.T) {
+	s, store, out := setupTestServer(t)
+	in := &bytes.Buffer{}
+
+	wingPath := "/test/narrative-search"
+	wingID, err := store.GetOrCreateWing(wingPath)
+	if err != nil {
+		t.Fatalf("GetOrCreateWing failed: %v", err)
+	}
+
+	now := time.Now().Truncate(time.Second)
+	err = store.InsertSummaryDrawer(
+		wingID,
+		"sess-narrative",
+		storage.HallFact,
+		"SQLite busy_timeout invariant",
+		"Set busy_timeout to 5000ms to prevent lock contention under concurrent access.",
+		now,
+		now,
+		now,
+	)
+	if err != nil {
+		t.Fatalf("InsertSummaryDrawer failed: %v", err)
+	}
+
+	searchReq := `{"jsonrpc":"2.0","id":301,"method":"tools/call","params":{"name":"search_memory","arguments":{"query":"busy_timeout","wing_path":"/test/narrative-search"}}}`
+	resp, err := sendRequest(s, in, out, searchReq)
+	if err != nil || resp == nil {
+		t.Fatalf("search_memory call failed: %v", err)
+	}
+	resMap := resp.Result.(map[string]interface{})
+	contentArr := resMap["content"].([]interface{})
+	firstItem := contentArr[0].(map[string]interface{})
+	text := firstItem["text"].(string)
+
+	if !strings.Contains(text, "SQLite busy_timeout invariant") {
+		t.Fatalf("expected content in search result, got: %s", text)
+	}
+	if !strings.Contains(text, "Narrative: Set busy_timeout to 5000ms to prevent lock contention under concurrent access.") {
+		t.Fatalf("expected narrative in search result, got: %s", text)
+	}
+}
+
+func TestMCP_GetTimeline_WithDigestAndNarrative(t *testing.T) {
+	s, store, out := setupTestServer(t)
+	in := &bytes.Buffer{}
+
+	wingPath := "/test/timeline-digest"
+	wingID, err := store.GetOrCreateWing(wingPath)
+	if err != nil {
+		t.Fatalf("GetOrCreateWing failed: %v", err)
+	}
+
+	now := time.Now().Truncate(time.Second)
+	sessionID := "sess-tl-digest"
+
+	digest := storage.SessionDigest{
+		WingID:       wingID,
+		SessionID:    sessionID,
+		Request:      "Implement timeline digest metadata",
+		Investigated: "Explored MCP timeline format",
+		Learned:      "Showing digest at top improves context",
+		Completed:    "Added digest header to timeline",
+		NextSteps:    "Integrate UI timeline card",
+		Notes:        "",
+		CreatedAt:    now,
+	}
+	if err := store.UpsertSessionDigest(digest); err != nil {
+		t.Fatalf("UpsertSessionDigest failed: %v", err)
+	}
+
+	err = store.InsertSummaryDrawer(
+		wingID,
+		sessionID,
+		storage.HallDiscovery,
+		"Timeline summary bullet",
+		"Timeline detailed narrative explaining the discovery context.",
+		now,
+		now,
+		now,
+	)
+	if err != nil {
+		t.Fatalf("InsertSummaryDrawer failed: %v", err)
+	}
+
+	timeReq := `{"jsonrpc":"2.0","id":401,"method":"tools/call","params":{"name":"get_timeline","arguments":{"session_id":"sess-tl-digest","wing_path":"/test/timeline-digest"}}}`
+	resp, err := sendRequest(s, in, out, timeReq)
+	if err != nil || resp == nil {
+		t.Fatalf("get_timeline call failed: %v", err)
+	}
+	resMap := resp.Result.(map[string]interface{})
+	contentArr := resMap["content"].([]interface{})
+	firstItem := contentArr[0].(map[string]interface{})
+	text := firstItem["text"].(string)
+
+	if !strings.Contains(text, "Session Digest") ||
+		!strings.Contains(text, "Implement timeline digest metadata") ||
+		!strings.Contains(text, "Added digest header to timeline") {
+		t.Fatalf("timeline missing session digest header, got: %s", text)
+	}
+
+	if !strings.Contains(text, "Timeline summary bullet") {
+		t.Fatalf("timeline missing summary content, got: %s", text)
+	}
+
+	if !strings.Contains(text, "Narrative: Timeline detailed narrative explaining the discovery context.") {
+		t.Fatalf("timeline missing narrative text, got: %s", text)
+	}
+}
+
 
