@@ -556,8 +556,8 @@ func TestPollOnceRetriesSummarizationAfterTransientFailure(t *testing.T) {
 	if summaries[0].Content != "listed the project files" {
 		t.Fatalf("unexpected summary content: %q", summaries[0].Content)
 	}
-	if invoker.calls != 2 {
-		t.Fatalf("expected exactly 2 invoker calls (1 failed + 1 retry), got %d", invoker.calls)
+	if invoker.calls != 3 {
+		t.Fatalf("expected exactly 3 invoker calls (1 failed + 1 retry summary + 1 digest synthesis), got %d", invoker.calls)
 	}
 }
 
@@ -716,6 +716,49 @@ func TestDaemon_SkipsRedundantPollStateWrites(t *testing.T) {
 	}
 	if val, _, _ := store.GetPollState(agyKey); val != sentinel2 {
 		t.Fatalf("expected agy poll_state to remain sentinel2 %d, got %d", sentinel2, val)
+	}
+}
+
+func TestPollOnce_SynthesizesDigestOnDebounce(t *testing.T) {
+	dir := t.TempDir()
+	projectsRoot := filepath.Join(dir, "claude-projects")
+	writeSampleTranscript(t, projectsRoot)
+
+	store, err := storage.Open(filepath.Join(dir, "memremark.db"))
+	if err != nil {
+		t.Fatalf("storage.Open: %v", err)
+	}
+	defer store.Close()
+
+	summariesDB := filepath.Join(dir, "antigravity", "conversation_summaries.db")
+	if err := os.MkdirAll(filepath.Dir(summariesDB), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	createEmptySummariesDB(t, summariesDB)
+
+	invoker := &dualStubInvoker{
+		summaryJSON: `[{"hall":"fact","content":"listed the project files","narrative":"user checked repo contents"}]`,
+		digestJSON:  `{"request":"List files","investigated":"Checked dir","learned":"Found repo layout","completed":"Ran ls","next_steps":"","notes":""}`,
+	}
+	d := New(store, projectsRoot, summariesDB, invoker, stubInvoker{reply: "[]"})
+
+	base := time.Now()
+	if err := d.PollOnce(context.Background(), base); err != nil {
+		t.Fatalf("first PollOnce: %v", err)
+	}
+	if err := d.PollOnce(context.Background(), base.Add(10*time.Second)); err != nil {
+		t.Fatalf("second PollOnce: %v", err)
+	}
+
+	digest, err := store.GetSessionDigest("sess-1")
+	if err != nil {
+		t.Fatalf("GetSessionDigest: %v", err)
+	}
+	if digest == nil {
+		t.Fatalf("expected session digest to be created on debounce, got nil")
+	}
+	if digest.Request != "List files" || digest.Completed != "Ran ls" {
+		t.Errorf("unexpected digest fields: %+v", digest)
 	}
 }
 

@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"log"
 	"time"
 
 	"github.com/haminh7036/memremark/internal/observation"
@@ -92,7 +93,7 @@ func (d *Daemon) summarizeSessionWithBatchSize(ctx context.Context, sessionID st
 		coversFrom := batch[0].CreatedAt
 		coversTo := batch[len(batch)-1].CreatedAt
 		for _, item := range items {
-			if err := d.Store.InsertSummaryDrawer(wingID, sessionID, item.Hall, item.Content, "", coversFrom, coversTo, now); err != nil {
+			if err := d.Store.InsertSummaryDrawer(wingID, sessionID, item.Hall, item.Content, item.Narrative, coversFrom, coversTo, now); err != nil {
 				return err
 			}
 		}
@@ -114,7 +115,62 @@ func (d *Daemon) summarizeSessionWithBatchSize(ctx context.Context, sessionID st
 			return err
 		}
 	}
+	if err := d.synthesizeSessionDigest(ctx, sessionID, wingID, invoker, now); err != nil {
+		log.Printf("daemon: synthesize session digest for %s: %v", sessionID, err)
+	}
 	return nil
+}
+
+func (d *Daemon) synthesizeSessionDigest(ctx context.Context, sessionID string, wingID int64, invoker summarizer.Invoker, now time.Time) error {
+	if d.Store == nil || invoker == nil {
+		return nil
+	}
+
+	summaries, err := d.Store.GetDrawersBySession(wingID, sessionID, "summary")
+	if err != nil {
+		return err
+	}
+
+	var fallbackVerbatim []storage.Drawer
+	if len(summaries) == 0 {
+		fallbackVerbatim, err = d.Store.GetDrawersBySession(wingID, sessionID, "verbatim")
+		if err != nil {
+			return err
+		}
+	}
+
+	if len(summaries) == 0 && len(fallbackVerbatim) == 0 {
+		return nil
+	}
+
+	var opts summarizer.InvokerOptions
+	if wing, err := d.Store.GetWingByID(wingID); err == nil && wing != nil {
+		opts = summarizer.InvokerOptions{
+			SessionID: storage.WingSummarySessionID(wing.Path),
+			WorkDir:   wing.Path,
+		}
+	}
+
+	res, err := summarizer.SynthesizeSessionDigest(ctx, invoker, summaries, fallbackVerbatim, d.TargetLanguage, opts)
+	if err != nil {
+		return err
+	}
+	if res == nil {
+		return nil
+	}
+
+	digest := storage.SessionDigest{
+		WingID:       wingID,
+		SessionID:    sessionID,
+		Request:      res.Request,
+		Investigated: res.Investigated,
+		Learned:      res.Learned,
+		Completed:    res.Completed,
+		NextSteps:    res.NextSteps,
+		Notes:        res.Notes,
+		CreatedAt:    now,
+	}
+	return d.Store.UpsertSessionDigest(digest)
 }
 
 // takeBatch returns the longest prefix of verbatim whose combined Content

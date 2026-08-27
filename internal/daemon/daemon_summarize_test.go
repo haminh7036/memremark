@@ -8,10 +8,29 @@ import (
 	"testing"
 	"time"
 
+	"github.com/haminh7036/memremark/internal/locale"
 	"github.com/haminh7036/memremark/internal/observation"
 	"github.com/haminh7036/memremark/internal/storage"
 	"github.com/haminh7036/memremark/internal/summarizer"
 )
+
+type dualStubInvoker struct {
+	summaryJSON string
+	digestJSON  string
+	digestErr   error
+	calls       int
+}
+
+func (d *dualStubInvoker) Invoke(ctx context.Context, prompt string, opts ...summarizer.InvokerOptions) (string, error) {
+	d.calls++
+	if strings.Contains(prompt, "structured session digest") || strings.Contains(prompt, "Distilled Memory Items") {
+		if d.digestErr != nil {
+			return "", d.digestErr
+		}
+		return d.digestJSON, nil
+	}
+	return d.summaryJSON, nil
+}
 
 // recordingInvoker remembers every batch of observations it was asked to
 // summarize, so tests can assert on how the caller chunked its input.
@@ -22,7 +41,9 @@ type recordingInvoker struct {
 }
 
 func (r *recordingInvoker) Invoke(ctx context.Context, prompt string, opts ...summarizer.InvokerOptions) (string, error) {
-	r.batches = append(r.batches, nil) // placeholder; prompt itself isn't parsed back into observations
+	if !strings.Contains(prompt, "structured session digest") && !strings.Contains(prompt, "Distilled Memory Items") {
+		r.batches = append(r.batches, nil) // placeholder; prompt itself isn't parsed back into observations
+	}
 	if len(opts) > 0 {
 		r.opts = append(r.opts, opts[0])
 	}
@@ -398,16 +419,127 @@ func TestDaemon_SummarizeSession_PassesDeterministicSessionIDAndWorkDir(t *testi
 		t.Fatalf("summarizeSession: %v", err)
 	}
 
-	if len(invoker.opts) != 1 {
-		t.Fatalf("expected 1 opts recorded, got %d", len(invoker.opts))
+	if len(invoker.opts) == 0 {
+		t.Fatalf("expected opts recorded, got %d", len(invoker.opts))
 	}
 
 	expectedSessionID := storage.WingSummarySessionID(projectPath)
-	if invoker.opts[0].SessionID != expectedSessionID {
-		t.Errorf("expected SessionID %q, got %q", expectedSessionID, invoker.opts[0].SessionID)
+	for i, opt := range invoker.opts {
+		if opt.SessionID != expectedSessionID {
+			t.Errorf("call %d: expected SessionID %q, got %q", i, expectedSessionID, opt.SessionID)
+		}
+		if opt.WorkDir != projectPath {
+			t.Errorf("call %d: expected WorkDir %q, got %q", i, projectPath, opt.WorkDir)
+		}
 	}
-	if invoker.opts[0].WorkDir != projectPath {
-		t.Errorf("expected WorkDir %q, got %q", projectPath, invoker.opts[0].WorkDir)
+}
+
+func TestDaemon_SummarizeSession_CreatesSessionDigest(t *testing.T) {
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	wingID, _ := store.GetOrCreateWing("/home/user/proj")
+	sessionID := "test-session-digest"
+
+	digestJSON := `{"request":"Fix bug","investigated":"Logs","learned":"Root cause found","completed":"Patched logic","next_steps":"Deploy","notes":""}`
+	summaryJSON := `[{"hall":"fact","content":"Bug is fixed","narrative":"Fixed bug by checking null pointers"}]`
+
+	invoker := &dualStubInvoker{
+		summaryJSON: summaryJSON,
+		digestJSON:  digestJSON,
+	}
+
+	d := New(store, t.TempDir(), "", invoker, invoker, locale.TargetLanguage{Code: "en", Name: "English"})
+	d.sessionWing[sessionID] = wingID
+	d.sessionInvoker[sessionID] = invoker
+
+	now := time.Now()
+	_ = store.InsertVerbatimDrawer(wingID, sessionID, "edit", "fixed nil pointer", now)
+
+	if err := d.summarizeSession(context.Background(), sessionID, now); err != nil {
+		t.Fatalf("summarizeSession failed: %v", err)
+	}
+
+	digest, err := store.GetSessionDigest(sessionID)
+	if err != nil {
+		t.Fatalf("GetSessionDigest failed: %v", err)
+	}
+	if digest == nil {
+		t.Fatalf("expected session digest to be created, got nil")
+	}
+	if digest.Request != "Fix bug" || digest.Completed != "Patched logic" {
+		t.Errorf("unexpected digest fields: %+v", digest)
+	}
+}
+
+func TestDaemon_SummarizeSession_DigestSynthesisErrorNonBlocking(t *testing.T) {
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	wingID, _ := store.GetOrCreateWing("/home/user/proj")
+	sessionID := "test-session-digest-err"
+
+	invoker := &dualStubInvoker{
+		summaryJSON: `[{"hall":"fact","content":"Summary works","narrative":"Narrative works"}]`,
+		digestErr:   errors.New("LLM error on digest synthesis"),
+	}
+
+	d := New(store, t.TempDir(), "", invoker, invoker, locale.TargetLanguage{Code: "en", Name: "English"})
+	d.sessionWing[sessionID] = wingID
+	d.sessionInvoker[sessionID] = invoker
+
+	now := time.Now()
+	_ = store.InsertVerbatimDrawer(wingID, sessionID, "edit", "some changes", now)
+
+	if err := d.summarizeSession(context.Background(), sessionID, now); err != nil {
+		t.Fatalf("summarizeSession failed unexpectedly: %v", err)
+	}
+
+	summaries, err := store.RecentSummaries(wingID, 10)
+	if err != nil {
+		t.Fatalf("RecentSummaries failed: %v", err)
+	}
+	if len(summaries) != 1 || summaries[0].Content != "Summary works" {
+		t.Errorf("expected 1 summary drawer, got %+v", summaries)
+	}
+
+	digest, err := store.GetSessionDigest(sessionID)
+	if err != nil {
+		t.Fatalf("GetSessionDigest failed: %v", err)
+	}
+	if digest != nil {
+		t.Errorf("expected no digest when synthesis fails, got %+v", digest)
+	}
+}
+
+func TestDaemon_SynthesizeSessionDigest_Direct(t *testing.T) {
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	wingID, _ := store.GetOrCreateWing("/home/user/proj")
+	sessionID := "test-session-direct"
+
+	now := time.Now().Truncate(time.Second)
+	_ = store.InsertSummaryDrawer(wingID, sessionID, "fact", "Cache added", "Added Redis cache", now, now, now)
+
+	digestJSON := `{"request":"Optimize latency","investigated":"Profiled DB","learned":"Queries slow","completed":"Added Redis cache","next_steps":"","notes":""}`
+	invoker := &dualStubInvoker{digestJSON: digestJSON}
+
+	d := New(store, t.TempDir(), "", invoker, invoker, locale.TargetLanguage{Code: "en", Name: "English"})
+
+	if err := d.synthesizeSessionDigest(context.Background(), sessionID, wingID, invoker, now); err != nil {
+		t.Fatalf("synthesizeSessionDigest failed: %v", err)
+	}
+
+	digest, err := store.GetSessionDigest(sessionID)
+	if err != nil {
+		t.Fatalf("GetSessionDigest failed: %v", err)
+	}
+	if digest == nil {
+		t.Fatalf("expected digest to be created, got nil")
+	}
+	if digest.Request != "Optimize latency" || digest.Completed != "Added Redis cache" {
+		t.Errorf("unexpected digest fields: %+v", digest)
 	}
 }
 
