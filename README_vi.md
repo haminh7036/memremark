@@ -21,15 +21,16 @@ MemRemark hoạt động theo mô hình **Active Memory Palace**:
 5. **Trực quan hóa (Timeline Dashboard)**: Cung cấp Web UI độc lập (`memremark-ui`) xem dòng thời gian tri thức theo từng workspace.
 
 ## Trạng thái dự án & Lộ trình
-- **Phase 1: Core Engine, MCP Server & Web Dashboard (Single Host)** — **`v0.1.8` (Hoàn thành & Đã kiểm thử)**
+- **Phase 1: Core Engine, MCP Server & Web Dashboard (Single Host)** — **`v0.1.9` (Hoàn thành & Đã kiểm thử)**
   - Tự động trích xuất transcript từ Claude Code và Antigravity CLI.
   - Daemon tóm tắt chạy nền với **Direct API Invokers (Gemini & Anthropic)**, **cơ chế tự động phát hiện CLI khi khởi động (Startup Capability Discovery)** và Fallback 2 chiều.
+  - **Schema chắt lọc tri thức nâng cao (Richer Knowledge Distillation)**: Phân tách Facts vs Narrative cho summary drawers và tự động tổng hợp macro session digests (`session_digests` table).
   - **Tối ưu hóa tài nguyên vượt trội**: Tốn gần 0MB RAM phụ trội (so với ~1.2GB peak RSS khi gọi `agy -p`) và độ trễ <1s khi có API key.
   - **Đúc kết tri thức thích ứng theo ngôn ngữ & quốc gia (Locale-Adaptive)**: Tự động nhận diện locale hệ thống (`$LANG`, `$LC_ALL`), bảo tồn thuật ngữ chuyên ngành và địa phương hóa header nạp bối cảnh.
   - **Hỗ trợ chạy độc lập Single-CLI & Multi-CLI**: Tự động thích ứng mượt mà khi máy chỉ cài Claude Code, chỉ cài Antigravity CLI hoặc có cả hai.
   - CLI Hooks nạp ngữ cảnh tinh gọn (`memremark-hook-claude` và `memremark-hook-agy`).
-  - MCP stdio server với 4 tools (`search_memory`, `remember`, `get_timeline`, `forget_memory`).
-  - Web Dashboard dòng thời gian Vue 3.5 + Tailwind v4 nhúng trực tiếp trong Go binary (`memremark-ui`).
+  - MCP stdio server với 5 tools (`search_memory`, `remember`, `get_session_digest`, `get_timeline`, `forget_memory`).
+  - Web Dashboard dòng thời gian Vue 3.5 + Tailwind v4 nhúng trực tiếp trong Go binary (`memremark-ui`) kèm modal chi tiết session digest.
   - Script cài đặt thông minh (`install.sh`) tự động nhận diện CLI và cấu hình có chọn lọc.
 - **Phase 2: Sync Layer (Đồng bộ đa thiết bị)** — *Kế hoạch tiếp theo (`v0.2.0`)*.
 

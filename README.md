@@ -25,15 +25,16 @@ MemRemark operates as an **Active Memory Palace**:
 ---
 
 ## Project Status & Roadmap
-- **Phase 1: Core Engine, MCP Server & Web Dashboard (Single Host)** — **`v0.1.8` (Complete & Tested)**
+- **Phase 1: Core Engine, MCP Server & Web Dashboard (Single Host)** — **`v0.1.9` (Complete & Tested)**
   - Transcript tailing & SQLite state capture for Claude Code and Antigravity CLI.
   - Headless background summarizer daemon with **Direct API Invokers (Gemini & Anthropic)**, **dynamic startup capability discovery**, and bidirectional auto-fallback.
+  - **Richer Knowledge Distillation Schema**: Facts vs Narrative split on summary drawers and automated macro session digests (`session_digests` table).
   - **Zero-Overhead Memory Distillation**: Near 0MB RAM addition (vs ~1.2GB peak RSS with `agy -p`) and <1s latency when API keys are present.
   - **Locale-Adaptive Knowledge Distillation**: Auto-detects user environment locale (`$LANG`, `$LC_ALL`) with dual-layer tech term preservation and multi-language context injection headers.
   - **Single-CLI & Multi-CLI Standalone Support**: Runs seamlessly on machines with only Claude Code, only Antigravity CLI, or both.
   - Seamless context injection hooks (`memremark-hook-claude` and `memremark-hook-agy`).
-  - Model Context Protocol (MCP) server with 4 tools (`search_memory`, `remember`, `get_timeline`, `forget_memory`).
-  - Interactive Web Dashboard (`memremark-ui`) with Vue 3.5 + Tailwind v4 timeline.
+  - Model Context Protocol (MCP) server with 5 tools (`search_memory`, `remember`, `get_session_digest`, `get_timeline`, `forget_memory`).
+  - Interactive Web Dashboard (`memremark-ui`) with Vue 3.5 + Tailwind v4 timeline and session digest modal.
   - Smart installer (`install.sh`) with automatic CLI detection and selective configuration.
 - **Phase 2: Sync Layer (Multi-Device Sync)** — *Planned (`v0.2.0`)*.
 
