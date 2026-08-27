@@ -25,7 +25,7 @@ func (s stubInvoker) Invoke(ctx context.Context, prompt string, opts ...InvokerO
 
 func TestSummarizeParsesValidJSONReply(t *testing.T) {
 	stub := stubInvoker{reply: "Here you go:\n" +
-		`[{"hall":"fact","content":"chose SQLite for v1"},{"hall":"discovery","content":"agy hooks don't execute"}]` +
+		`[{"hall":"fact","content":"chose SQLite for v1","narrative":"SQLite was chosen for local persistence"},{"hall":"discovery","content":"agy hooks don't execute","narrative":"agy does not run hook lifecycle events"}]` +
 		"\nHope that helps!"}
 
 	obs := []observation.Observation{{ToolName: "Bash", Content: "ls"}}
@@ -36,8 +36,11 @@ func TestSummarizeParsesValidJSONReply(t *testing.T) {
 	if len(items) != 2 {
 		t.Fatalf("expected 2 items, got %d: %+v", len(items), items)
 	}
-	if items[0].Hall != "fact" || items[0].Content != "chose SQLite for v1" {
+	if items[0].Hall != "fact" || items[0].Content != "chose SQLite for v1" || items[0].Narrative != "SQLite was chosen for local persistence" {
 		t.Fatalf("unexpected first item: %+v", items[0])
+	}
+	if items[1].Narrative != "agy does not run hook lifecycle events" {
+		t.Fatalf("unexpected second item narrative: %+v", items[1])
 	}
 }
 
@@ -86,7 +89,7 @@ func TestBuildPromptIncludesObservationContent(t *testing.T) {
 	if !strings.Contains(prompt, "ls -la") {
 		t.Fatalf("expected prompt to include observation content, got %q", prompt)
 	}
-	if !strings.Contains(prompt, "Write the \"content\" field in Vietnamese") {
+	if !strings.Contains(prompt, "Write the \"content\" and \"narrative\" fields in Vietnamese") {
 		t.Fatalf("expected prompt to include target language Vietnamese, got %q", prompt)
 	}
 	if !strings.Contains(prompt, "Strict code preservation") {
@@ -95,7 +98,7 @@ func TestBuildPromptIncludesObservationContent(t *testing.T) {
 
 	// Test Japanese prompt
 	promptJa := buildPrompt(obs, locale.TargetLanguage{Code: "ja", Name: "Japanese"})
-	if !strings.Contains(promptJa, "Write the \"content\" field in Japanese") {
+	if !strings.Contains(promptJa, "Write the \"content\" and \"narrative\" fields in Japanese") {
 		t.Fatalf("expected prompt to include Japanese, got %q", promptJa)
 	}
 }

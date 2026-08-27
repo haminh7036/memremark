@@ -248,8 +248,9 @@ func (f FallbackInvoker) Invoke(ctx context.Context, prompt string, opts ...Invo
 // SummaryItem is one distilled piece of knowledge the model extracted
 // from a batch of verbatim observations.
 type SummaryItem struct {
-	Hall    string `json:"hall"`
-	Content string `json:"content"`
+	Hall      string `json:"hall"`
+	Content   string `json:"content"`
+	Narrative string `json:"narrative,omitempty"`
 }
 
 // SummarizeWithOptions asks invoker to distill observations into hall-classified
@@ -291,10 +292,12 @@ func buildPrompt(observations []observation.Observation, lang locale.TargetLangu
 	sb.WriteString("- preference (user habits, workflow choices, preferences)\n")
 	sb.WriteString("- advice (actionable recommendations, solutions to pitfalls)\n\n")
 	sb.WriteString("Rules:\n")
-	sb.WriteString(fmt.Sprintf("1. Output language: Write the \"content\" field in %s. Use natural, standard technical terminology appropriate for %s (e.g. Katakana for Japanese, standard IT terms for Chinese, or common English terms where standard).\n", targetLangName, targetLangName))
+	sb.WriteString(fmt.Sprintf("1. Output language: Write the \"content\" and \"narrative\" fields in %s. Use natural, standard technical terminology appropriate for %s (e.g. Katakana for Japanese, standard IT terms for Chinese, or common English terms where standard).\n", targetLangName, targetLangName))
 	sb.WriteString("2. Strict code preservation: ALWAYS keep code identifiers, file paths, tool/command names, CLI flags, package names, and symbols in their exact original form (e.g., `main.go`, `go test -race`, `SQLite`, `memremarkd`).\n")
-	sb.WriteString("3. Style: Write direct, concise, telegraphic bullet points. Avoid filler words.\n")
-	sb.WriteString(`4. Format: Respond ONLY with a valid JSON array of objects: [{"hall":"...","content":"..."}]. If nothing is worth memorizing, return [].` + "\n\n")
+	sb.WriteString("3. Style:\n")
+	sb.WriteString("   - \"content\": Write direct, concise, telegraphic bullet points (1 line). Avoid filler words.\n")
+	sb.WriteString("   - \"narrative\": Provide a richer explanatory paragraph (2-4 sentences) capturing context, rationale, and nuances for deeper recall.\n")
+	sb.WriteString(`4. Format: Respond ONLY with a valid JSON array of objects: [{"hall":"...","content":"...","narrative":"..."}]. If nothing is worth memorizing, return [].` + "\n\n")
 	sb.WriteString("Observations:\n")
 	for _, o := range observations {
 		sb.WriteString(fmt.Sprintf("- [%s] %s\n", o.ToolName, o.Content))

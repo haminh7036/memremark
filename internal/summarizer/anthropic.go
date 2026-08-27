@@ -92,6 +92,9 @@ func (inv AnthropicAPIInvoker) Invoke(ctx context.Context, prompt string, opts .
 							"content": map[string]any{
 								"type": "string",
 							},
+							"narrative": map[string]any{
+								"type": "string",
+							},
 						},
 						"required":             []string{"hall", "content"},
 						"additionalProperties": false,

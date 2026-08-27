@@ -109,6 +109,9 @@ func (inv GeminiAPIInvoker) Invoke(ctx context.Context, prompt string, opts ...I
 						"content": {
 							Type: "STRING",
 						},
+						"narrative": {
+							Type: "STRING",
+						},
 					},
 					Required: []string{"hall", "content"},
 				},
