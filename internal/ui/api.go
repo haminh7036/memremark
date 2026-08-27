@@ -19,6 +19,7 @@ type DrawerItem struct {
 	Hall       string    `json:"hall"`
 	ToolName   string    `json:"tool_name,omitempty"`
 	Content    string    `json:"content"`
+	Narrative  string    `json:"narrative,omitempty"`
 	SessionID  string    `json:"session_id,omitempty"`
 	CoversFrom int64     `json:"covers_from,omitempty"`
 	CoversTo   int64     `json:"covers_to,omitempty"`
@@ -41,6 +42,45 @@ func (s *Server) handleWings(w http.ResponseWriter, r *http.Request) {
 		wings = []storage.WingStats{}
 	}
 	writeJSON(w, http.StatusOK, wings)
+}
+
+func (s *Server) handleWingDigests(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	wingID, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || wingID <= 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid wing id"})
+		return
+	}
+
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	digests, err := s.store.ListSessionDigests(wingID, limit)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if digests == nil {
+		digests = []storage.SessionDigest{}
+	}
+	writeJSON(w, http.StatusOK, digests)
+}
+
+func (s *Server) handleSessionDigest(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("sessionId")
+	if sessionID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "session id required"})
+		return
+	}
+
+	digest, err := s.store.GetSessionDigest(sessionID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if digest == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "session digest not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, digest)
 }
 
 func (s *Server) handleTimeline(w http.ResponseWriter, r *http.Request) {
@@ -79,6 +119,7 @@ func (s *Server) handleTimeline(w http.ResponseWriter, r *http.Request) {
 			Hall:       d.Hall,
 			ToolName:   d.ToolName,
 			Content:    d.Content,
+			Narrative:  d.Narrative,
 			SessionID:  d.SessionID,
 			CoversFrom: d.CoversFrom,
 			CoversTo:   d.CoversTo,

@@ -27,7 +27,7 @@ const props = defineProps({
   }
 })
 
-defineEmits(['clearFilters'])
+defineEmits(['clearFilters', 'viewDigest'])
 
 const wingsMap = computed(() => {
   const map = {}
@@ -144,6 +144,7 @@ function formatGroupDate(dateStr) {
             :key="item.id"
             :item="item"
             :wing="wingsMap[item.wing_id]"
+            @view-digest="$emit('viewDigest', $event)"
           />
         </div>
       </section>

@@ -5,6 +5,7 @@ import { ArrowUp } from 'lucide-vue-next'
 import Header from './components/Header.vue'
 import ControlBar from './components/ControlBar.vue'
 import TimelineView from './components/TimelineView.vue'
+import SessionDigestModal from './components/SessionDigestModal.vue'
 
 // State
 const wings = ref([])
@@ -31,6 +32,19 @@ const isLoading = ref(false)
 const autoPollInterval = ref(0)
 const lastUpdated = ref(null)
 const fetchError = ref(null)
+
+// Session Digest Modal State
+const activeDigestSessionId = ref(null)
+const isDigestModalOpen = ref(false)
+
+function openDigestModal(sessionId) {
+  activeDigestSessionId.value = sessionId
+  isDigestModalOpen.value = true
+}
+
+function closeDigestModal() {
+  isDigestModalOpen.value = false
+}
 
 const { y } = useWindowScroll({ behavior: 'smooth' })
 
@@ -188,8 +202,16 @@ onUnmounted(() => {
         :has-filters="hasFilters"
         :search-query="searchQuery"
         @clear-filters="clearFilters"
+        @view-digest="openDigestModal"
       />
     </main>
+
+    <!-- Session Digest Inspector Modal -->
+    <SessionDigestModal
+      :session-id="activeDigestSessionId"
+      :is-open="isDigestModalOpen"
+      @close="closeDigestModal"
+    />
 
     <!-- Floating Scroll To Top Button -->
     <transition

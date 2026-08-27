@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useClipboard } from '@vueuse/core'
 import {
   Copy,
@@ -14,7 +14,10 @@ import {
   Folder,
   Calendar,
   Hash,
-  FileCode
+  FileCode,
+  ChevronRight,
+  BookOpen,
+  FileText
 } from 'lucide-vue-next'
 
 const props = defineProps({
@@ -27,6 +30,10 @@ const props = defineProps({
     default: null
   }
 })
+
+const emit = defineEmits(['viewDigest'])
+
+const isNarrativeExpanded = ref(false)
 
 const { copy, copied } = useClipboard({ copiedDuring: 2000 })
 
@@ -193,15 +200,17 @@ function handleCopy() {
             {{ item.tool_name }}
           </span>
 
-          <!-- Session Badge (if present) -->
-          <span
+          <!-- Session Badge (Clickable to view Session Digest) -->
+          <button
             v-if="item.session_id"
-            :title="`Session ID: ${item.session_id}`"
-            class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono bg-zinc-50 dark:bg-zinc-850 text-zinc-500 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-800"
+            type="button"
+            @click="$emit('viewDigest', item.session_id)"
+            :title="`View Session Digest (${item.session_id})`"
+            class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono bg-zinc-50 dark:bg-zinc-850 text-zinc-500 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-800 hover:border-indigo-400 dark:hover:border-indigo-500 hover:text-indigo-600 dark:hover:text-indigo-400 cursor-pointer transition-colors"
           >
-            <Hash class="w-2.5 h-2.5 text-zinc-400" />
-            {{ item.session_id.length > 8 ? item.session_id.slice(0, 8) + '…' : item.session_id }}
-          </span>
+            <FileText class="w-2.5 h-2.5 text-zinc-400 group-hover:text-indigo-500" />
+            <span>{{ item.session_id.length > 8 ? item.session_id.slice(0, 8) + '…' : item.session_id }}</span>
+          </button>
         </div>
 
         <!-- Right: Timestamp & Copy Button -->
@@ -250,6 +259,29 @@ function handleCopy() {
             <pre class="p-3 text-xs font-mono overflow-x-auto text-zinc-800 dark:text-zinc-200"><code>{{ seg.code }}</code></pre>
           </div>
         </template>
+      </div>
+
+      <!-- Expandable Narrative Context Section -->
+      <div v-if="item.narrative" class="mt-3 pt-2.5 border-t border-zinc-100 dark:border-zinc-800/80">
+        <button
+          type="button"
+          @click="isNarrativeExpanded = !isNarrativeExpanded"
+          class="inline-flex items-center gap-1.5 text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 transition-colors cursor-pointer py-0.5 rounded focus:outline-none"
+        >
+          <ChevronRight :class="['w-3.5 h-3.5 transition-transform duration-200', isNarrativeExpanded ? 'rotate-90' : '']" />
+          <span>{{ isNarrativeExpanded ? 'Hide Detailed Narrative' : 'Show Detailed Narrative' }}</span>
+        </button>
+
+        <div
+          v-show="isNarrativeExpanded"
+          class="mt-2 p-3.5 rounded-lg bg-zinc-50 dark:bg-zinc-950 border border-zinc-200/80 dark:border-zinc-800/80 text-xs text-zinc-700 dark:text-zinc-300 leading-relaxed whitespace-pre-wrap font-normal"
+        >
+          <div class="flex items-center gap-1.5 text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1.5">
+            <BookOpen class="w-3.5 h-3.5 text-indigo-500" />
+            <span>Context & Narrative</span>
+          </div>
+          {{ item.narrative }}
+        </div>
       </div>
 
       <!-- Card Footer: Workspace & Coverage Range (if present) -->

@@ -31,6 +31,8 @@ func NewServer(store *storage.Store, assets fs.FS) *Server {
 
 func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/wings", s.handleWings)
+	s.mux.HandleFunc("GET /api/wings/{id}/digests", s.handleWingDigests)
+	s.mux.HandleFunc("GET /api/sessions/{sessionId}/digest", s.handleSessionDigest)
 	s.mux.HandleFunc("GET /api/timeline", s.handleTimeline)
 	s.mux.HandleFunc("GET /api/stats", s.handleStats)
 
