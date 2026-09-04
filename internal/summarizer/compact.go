@@ -3,6 +3,7 @@ package summarizer
 import (
 	"fmt"
 	"regexp"
+	"unicode/utf8"
 
 	"github.com/haminh7036/memremark/internal/observation"
 	"github.com/haminh7036/memremark/internal/storage"
@@ -27,8 +28,15 @@ func TruncateContent(content string, maxLen int) string {
 		return cleaned
 	}
 	half := maxLen / 2
-	omitted := len(cleaned) - (half * 2)
-	return fmt.Sprintf("%s\n... [truncated %d bytes] ...\n%s", cleaned[:half], omitted, cleaned[len(cleaned)-half:])
+	for half > 0 && !utf8.RuneStart(cleaned[half]) {
+		half--
+	}
+	tailStart := len(cleaned) - (maxLen / 2)
+	for tailStart < len(cleaned) && !utf8.RuneStart(cleaned[tailStart]) {
+		tailStart++
+	}
+	omitted := tailStart - half
+	return fmt.Sprintf("%s\n... [truncated %d bytes] ...\n%s", cleaned[:half], omitted, cleaned[tailStart:])
 }
 
 // CompactAndBudget pre-compacts raw verbatim drawers and selects the longest

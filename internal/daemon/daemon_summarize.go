@@ -80,6 +80,10 @@ func (d *Daemon) summarizeWing(ctx context.Context, wingID int64, now time.Time)
 
 	callCtx, cancel := context.WithCancel(ctx)
 	d.RegisterActiveCancel(cancel)
+	defer func() {
+		d.ClearActiveCancel()
+		cancel()
+	}()
 	items, err := summarizer.SummarizeWithOptions(callCtx, invoker, obs, d.TargetLanguage, opts)
 	d.ClearActiveCancel()
 	cancel()

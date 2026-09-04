@@ -124,7 +124,11 @@ func (d *Daemon) Warmup() error {
 		}
 
 		wingKey := strconv.FormatInt(wingID, 10)
-		d.wingInvoker[wingID] = d.claudeInvoker
+		inv := d.claudeInvoker
+		if inv == nil {
+			inv = d.antigravityInvoker
+		}
+		d.wingInvoker[wingID] = inv
 		touchTime := now.Add(-idleWindow - time.Duration(i+1)*time.Second)
 		d.Tracker.Touch(wingKey, touchTime)
 	}
@@ -174,6 +178,12 @@ func (d *Daemon) PollOnce(ctx context.Context, now time.Time) error {
 		}
 		d.Tracker.Consume(wingKey)
 		processed++
+
+		// If more unsummarized verbatim rows remain in this wing, re-arm debounce so
+		// subsequent poll ticks continue draining the backlog without stalling.
+		if pending, err := d.Store.UnsummarizedVerbatimByWing(wingID, 1); err == nil && len(pending) > 0 {
+			d.Tracker.Touch(wingKey, now)
+		}
 	}
 	return nil
 }
