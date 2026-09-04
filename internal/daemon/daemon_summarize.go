@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"log"
+	"strconv"
 	"time"
 
 	"github.com/haminh7036/memremark/internal/observation"
@@ -27,9 +28,12 @@ func (d *Daemon) recordObservation(obs observation.Observation, invoker summariz
 	if err := d.Store.InsertVerbatimDrawer(wingID, obs.SessionID, obs.ToolName, obs.Content, createdAt); err != nil {
 		return err
 	}
+	if invoker != nil {
+		d.wingInvoker[wingID] = invoker
+	}
 	d.sessionWing[obs.SessionID] = wingID
 	d.sessionInvoker[obs.SessionID] = invoker
-	d.Tracker.Touch(obs.SessionID, now)
+	d.Tracker.Touch(strconv.FormatInt(wingID, 10), now)
 	return nil
 }
 

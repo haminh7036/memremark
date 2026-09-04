@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"log"
+	"strconv"
 	"sync"
 	"time"
 
@@ -50,6 +51,7 @@ type Daemon struct {
 
 	sessionWing    map[string]int64
 	sessionInvoker map[string]summarizer.Invoker
+	wingInvoker    map[int64]summarizer.Invoker
 
 	claudeInvoker      summarizer.Invoker
 	antigravityInvoker summarizer.Invoker
@@ -76,6 +78,7 @@ func New(store *storage.Store, claudeProjectsRoot, antigravitySummariesDB string
 		antigravityLastIdx:     make(map[string]int64),
 		sessionWing:            make(map[string]int64),
 		sessionInvoker:         make(map[string]summarizer.Invoker),
+		wingInvoker:            make(map[int64]summarizer.Invoker),
 		claudeInvoker:          claudeInvoker,
 		antigravityInvoker:     antigravityInvoker,
 	}
@@ -100,27 +103,30 @@ func New(store *storage.Store, claudeProjectsRoot, antigravitySummariesDB string
 // sessionWing are skipped so a live session's debounce clock is never
 // clobbered back to the epoch.
 func (d *Daemon) Warmup() error {
-	refs, err := d.Store.OrphanedVerbatimSessions()
+	wingIDs, err := d.Store.OrphanedVerbatimWings()
 	if err != nil {
 		return err
 	}
-	// Stagger orphaned sessions instead of firing them all at epoch=0 so
-	// the very first PollOnce doesn't launch N concurrent agy processes at
-	// once (each pulling in a full MCP stack → 3–5GB RAM spike).
-	// Space them 1s apart; they all still fire well before a real idle
-	// window (5s) so no visible delay vs the previous behavior.
 	now := time.Now()
-	for i, ref := range refs {
-		if _, tracked := d.sessionWing[ref.SessionID]; tracked {
+	for i, wingID := range wingIDs {
+		if _, tracked := d.wingInvoker[wingID]; tracked {
 			continue
 		}
-		d.sessionWing[ref.SessionID] = ref.WingID
-		d.sessionInvoker[ref.SessionID] = d.claudeInvoker
-		// Distribute sessions so they fire 1s apart and are all
-		// already past idleWindow on the first PollOnce tick.
-		// Using -(idleWindow + (i+1)*second) ensures now-touchTime > idleWindow.
+		tracked := false
+		for _, wID := range d.sessionWing {
+			if wID == wingID {
+				tracked = true
+				break
+			}
+		}
+		if tracked {
+			continue
+		}
+
+		wingKey := strconv.FormatInt(wingID, 10)
+		d.wingInvoker[wingID] = d.claudeInvoker
 		touchTime := now.Add(-idleWindow - time.Duration(i+1)*time.Second)
-		d.Tracker.Touch(ref.SessionID, touchTime)
+		d.Tracker.Touch(wingKey, touchTime)
 	}
 	return nil
 }
@@ -147,22 +153,59 @@ func (d *Daemon) PollOnce(ctx context.Context, now time.Time) error {
 	}
 
 	processed := 0
-	for _, sessionID := range d.Tracker.Due(now, idleWindow) {
+	for _, dueKey := range d.Tracker.Due(now, idleWindow) {
 		if ctx.Err() != nil {
 			break
 		}
 		if processed >= maxSessionsPerTick {
 			break
 		}
-		if err := d.summarizeSession(ctx, sessionID, now); err != nil {
+
+		if wingID, err := strconv.ParseInt(dueKey, 10, 64); err == nil {
+			sessions := make(map[string]bool)
+			for sID, wID := range d.sessionWing {
+				if wID == wingID {
+					sessions[sID] = true
+				}
+			}
+			if refs, err := d.Store.OrphanedVerbatimSessions(); err == nil {
+				for _, ref := range refs {
+					if ref.WingID == wingID {
+						d.sessionWing[ref.SessionID] = wingID
+						d.sessionInvoker[ref.SessionID] = d.claudeInvoker
+						sessions[ref.SessionID] = true
+					}
+				}
+			}
+			failed := false
+			for sID := range sessions {
+				if err := d.summarizeSession(ctx, sID, now); err != nil {
+					if ctx.Err() != nil {
+						failed = true
+						break
+					}
+					log.Printf("daemon: summarize session %s failed: %v", sID, err)
+					failed = true
+					break
+				}
+			}
+			if failed {
+				continue
+			}
+			d.Tracker.Consume(dueKey)
+			processed++
+			continue
+		}
+
+		if err := d.summarizeSession(ctx, dueKey, now); err != nil {
 			if ctx.Err() != nil {
 				break
 			}
 			// Do NOT consume on failure -- retry next tick.
-			log.Printf("daemon: summarize session %s failed: %v", sessionID, err)
+			log.Printf("daemon: summarize session %s failed: %v", dueKey, err)
 			continue
 		}
-		d.Tracker.Consume(sessionID)
+		d.Tracker.Consume(dueKey)
 		processed++
 	}
 	return nil
