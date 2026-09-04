@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/haminh7036/memremark/internal/adapter/antigravity"
@@ -30,6 +31,11 @@ type Daemon struct {
 	Store          *storage.Store
 	Tracker        *debounce.Tracker
 	TargetLanguage locale.TargetLanguage
+
+	pauseMu        sync.Mutex
+	pauseFilePath  string
+	activeCancelMu sync.Mutex
+	activeCancel   func()
 
 	claudeProjectsRoot string
 	claudeTailer       *claudecode.Tailer
@@ -130,6 +136,10 @@ const maxSessionsPerTick = 2
 // PollOnce runs one capture pass over both CLIs' transcripts, then
 // triggers summarization for any session that has gone idle.
 func (d *Daemon) PollOnce(ctx context.Context, now time.Time) error {
+	if d.IsPaused() {
+		return nil
+	}
+
 	if err := d.pollClaudeCode(now); err != nil {
 		log.Printf("daemon: claude code poll error: %v", err)
 	}
