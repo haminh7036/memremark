@@ -383,7 +383,68 @@ func resolveInvokers(cfg config.Config, lookPath func(string) (string, error)) I
 	}
 }
 
+func isPaused(pauseFile string) bool {
+	_, err := os.Stat(pauseFile)
+	return err == nil
+}
+
+func runPause(pauseFile string) error {
+	if err := os.MkdirAll(filepath.Dir(pauseFile), 0o755); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(pauseFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+	return f.Close()
+}
+
+func runResume(pauseFile string) error {
+	err := os.Remove(pauseFile)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+func handleSubcommands() bool {
+	if len(os.Args) < 2 {
+		return false
+	}
+	cmd := os.Args[1]
+	pauseFile := daemon.DefaultPauseFilePath()
+
+	switch cmd {
+	case "pause":
+		if err := runPause(pauseFile); err != nil {
+			fmt.Fprintf(os.Stderr, "memremarkd: failed to pause: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("memremarkd: paused (active CLI processes stopped, summarization suspended)")
+		return true
+	case "resume":
+		if err := runResume(pauseFile); err != nil {
+			fmt.Fprintf(os.Stderr, "memremarkd: failed to resume: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("memremarkd: resumed (summarization enabled)")
+		return true
+	case "status":
+		if isPaused(pauseFile) {
+			fmt.Printf("memremarkd: PAUSED (pause file: %s)\n", pauseFile)
+		} else {
+			fmt.Println("memremarkd: ACTIVE (normal polling)")
+		}
+		return true
+	}
+	return false
+}
+
 func main() {
+	if handleSubcommands() {
+		return
+	}
+
 	home, err := os.UserHomeDir()
 	if err != nil {
 		log.Fatalf("memremarkd: resolve home dir: %v", err)

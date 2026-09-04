@@ -472,4 +472,101 @@ func TestResolveInvokers_ExplicitProvider_CLIOverridesAPIKeys(t *testing.T) {
 	}
 }
 
+func TestSubcommands(t *testing.T) {
+	tempDir := t.TempDir()
+	pauseFile := filepath.Join(tempDir, "paused")
+	t.Setenv("MEMREMARK_PAUSE_FILE", pauseFile)
+
+	// Test status when not paused
+	if isPaused(pauseFile) {
+		t.Fatal("expected not paused initially")
+	}
+
+	// Test pause
+	if err := runPause(pauseFile); err != nil {
+		t.Fatalf("runPause failed: %v", err)
+	}
+	if !isPaused(pauseFile) {
+		t.Fatal("expected paused after runPause")
+	}
+
+	// Test resume
+	if err := runResume(pauseFile); err != nil {
+		t.Fatalf("runResume failed: %v", err)
+	}
+	if isPaused(pauseFile) {
+		t.Fatal("expected not paused after runResume")
+	}
+}
+
+func TestHandleSubcommands(t *testing.T) {
+	tempDir := t.TempDir()
+	pauseFile := filepath.Join(tempDir, "paused")
+	t.Setenv("MEMREMARK_PAUSE_FILE", pauseFile)
+
+	origArgs := os.Args
+	defer func() { os.Args = origArgs }()
+
+	// Test no args
+	os.Args = []string{"memremarkd"}
+	if handleSubcommands() {
+		t.Error("expected false for no args")
+	}
+
+	// Test unknown subcommand
+	os.Args = []string{"memremarkd", "unknown"}
+	if handleSubcommands() {
+		t.Error("expected false for unknown subcommand")
+	}
+
+	// Test status when not paused
+	os.Args = []string{"memremarkd", "status"}
+	if !handleSubcommands() {
+		t.Error("expected true for status")
+	}
+	if isPaused(pauseFile) {
+		t.Error("expected not paused")
+	}
+
+	// Test pause
+	os.Args = []string{"memremarkd", "pause"}
+	if !handleSubcommands() {
+		t.Error("expected true for pause")
+	}
+	if !isPaused(pauseFile) {
+		t.Error("expected paused after pause command")
+	}
+
+	// Test status when paused
+	os.Args = []string{"memremarkd", "status"}
+	if !handleSubcommands() {
+		t.Error("expected true for status when paused")
+	}
+
+	// Test resume
+	os.Args = []string{"memremarkd", "resume"}
+	if !handleSubcommands() {
+		t.Error("expected true for resume")
+	}
+	if isPaused(pauseFile) {
+		t.Error("expected not paused after resume command")
+	}
+}
+
+func TestSubcommands_EdgeCases(t *testing.T) {
+	// runResume when file does not exist should not error
+	nonExistentFile := filepath.Join(t.TempDir(), "non-existent")
+	if err := runResume(nonExistentFile); err != nil {
+		t.Errorf("expected no error when resuming non-existent file, got %v", err)
+	}
+
+	// runPause with invalid path should return an error
+	invalidPath := filepath.Join("/dev/null", "impossible", "path")
+	if err := runPause(invalidPath); err == nil {
+		t.Errorf("expected error when pausing with invalid path")
+	}
+}
+
+
+
 
