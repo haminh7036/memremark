@@ -11,6 +11,9 @@ import (
 )
 
 func (d *Daemon) recordObservation(obs observation.Observation, invoker summarizer.Invoker, now time.Time) error {
+	d.cliMutex.Lock()
+	defer d.cliMutex.Unlock()
+
 	wingID, err := d.Store.GetOrCreateWing(obs.WingPath)
 	if err != nil {
 		return err
@@ -65,6 +68,9 @@ func (d *Daemon) summarizeWing(ctx context.Context, wingID int64, now time.Time)
 	}
 	if invoker == nil {
 		invoker = d.antigravityInvoker
+	}
+	if invoker == nil {
+		return nil
 	}
 
 	opts := summarizer.InvokerOptions{
