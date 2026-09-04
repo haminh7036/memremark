@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	_ "modernc.org/sqlite"
 
@@ -72,6 +73,13 @@ func (inv ClaudeCodeInvoker) Invoke(ctx context.Context, prompt string, opts ...
 		opt = opts[0]
 	}
 	cmd := exec.CommandContext(ctx, "claude", inv.buildArgs(opt.SessionID)...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process != nil && cmd.Process.Pid > 0 {
+			return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		}
+		return nil
+	}
 	if opt.WorkDir != "" {
 		if info, err := os.Stat(opt.WorkDir); err == nil && info.IsDir() {
 			cmd.Dir = opt.WorkDir
@@ -137,6 +145,13 @@ func (inv AntigravityInvoker) Invoke(ctx context.Context, prompt string, opts ..
 		ensureAntigravityConversationFile(opt.SessionID)
 	}
 	cmd := exec.CommandContext(ctx, "agy", inv.buildArgs(prompt, opt.SessionID)...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process != nil && cmd.Process.Pid > 0 {
+			return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		}
+		return nil
+	}
 	if opt.WorkDir != "" {
 		if info, err := os.Stat(opt.WorkDir); err == nil && info.IsDir() {
 			cmd.Dir = opt.WorkDir
