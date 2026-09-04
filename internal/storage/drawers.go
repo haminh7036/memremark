@@ -178,6 +178,59 @@ func (s *Store) VerbatimSince(wingID int64, sessionID string, since time.Time) (
 	return out, rows.Err()
 }
 
+// UnsummarizedVerbatimByWing returns pending verbatim drawers for a wing across
+// all sessions, ordered chronologically by created_at ASC.
+func (s *Store) UnsummarizedVerbatimByWing(wingID int64, limit int) ([]Drawer, error) {
+	if limit <= 0 {
+		limit = 500
+	}
+	rows, err := s.db.Query(
+		`SELECT id, content, tool_name, session_id, created_at FROM drawers
+		 WHERE wing_id = ? AND type = 'verbatim'
+		 ORDER BY created_at ASC, id ASC LIMIT ?`,
+		wingID, limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("storage: query unsummarized verbatim by wing: %w", err)
+	}
+	defer rows.Close()
+
+	var out []Drawer
+	for rows.Next() {
+		var d Drawer
+		var toolName sql.NullString
+		var createdAt int64
+		if err := rows.Scan(&d.ID, &d.Content, &toolName, &d.SessionID, &createdAt); err != nil {
+			return nil, fmt.Errorf("storage: scan unsummarized verbatim row: %w", err)
+		}
+		d.WingID = wingID
+		d.Type = "verbatim"
+		d.ToolName = toolName.String
+		d.CreatedAt = time.Unix(createdAt, 0)
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// OrphanedVerbatimWings returns unique wing IDs that have unsummarized verbatim rows.
+func (s *Store) OrphanedVerbatimWings() ([]int64, error) {
+	rows, err := s.db.Query(`SELECT DISTINCT wing_id FROM drawers WHERE type = 'verbatim' ORDER BY wing_id ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("storage: query orphaned verbatim wings: %w", err)
+	}
+	defer rows.Close()
+
+	var wingIDs []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("storage: scan orphaned verbatim wing: %w", err)
+		}
+		wingIDs = append(wingIDs, id)
+	}
+	return wingIDs, rows.Err()
+}
+
 // LastSummaryCoversTo returns covers_to (the real verbatim event-time the
 // most recent summary drawer distilled up to) for a wing/session. ok is
 // false if no summary exists yet.
