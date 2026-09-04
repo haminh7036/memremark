@@ -46,6 +46,13 @@ func (d *Daemon) summarizeSession(ctx context.Context, sessionID string, now tim
 }
 
 func (d *Daemon) summarizeSessionWithBatchSize(ctx context.Context, sessionID string, now time.Time, maxBatchBytes int) error {
+	d.cliMutex.Lock()
+	defer d.cliMutex.Unlock()
+
+	if d.IsPaused() {
+		return nil
+	}
+
 	wingID, ok := d.sessionWing[sessionID]
 	if !ok {
 		return nil // never recorded an observation for this session; nothing to summarize
@@ -85,7 +92,11 @@ func (d *Daemon) summarizeSessionWithBatchSize(ctx context.Context, sessionID st
 			obs = append(obs, observation.Observation{ToolName: v.ToolName, Content: v.Content})
 		}
 
-		items, err := summarizer.SummarizeWithOptions(ctx, invoker, obs, d.TargetLanguage, opts)
+		callCtx, cancel := context.WithCancel(ctx)
+		d.RegisterActiveCancel(cancel)
+		items, err := summarizer.SummarizeWithOptions(callCtx, invoker, obs, d.TargetLanguage, opts)
+		d.ClearActiveCancel()
+		cancel()
 		if err != nil {
 			return err
 		}
@@ -151,7 +162,11 @@ func (d *Daemon) synthesizeSessionDigest(ctx context.Context, sessionID string, 
 		}
 	}
 
-	res, err := summarizer.SynthesizeSessionDigest(ctx, invoker, summaries, fallbackVerbatim, d.TargetLanguage, opts)
+	callCtx, cancel := context.WithCancel(ctx)
+	d.RegisterActiveCancel(cancel)
+	res, err := summarizer.SynthesizeSessionDigest(callCtx, invoker, summaries, fallbackVerbatim, d.TargetLanguage, opts)
+	d.ClearActiveCancel()
+	cancel()
 	if err != nil {
 		return err
 	}

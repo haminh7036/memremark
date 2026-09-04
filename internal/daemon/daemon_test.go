@@ -200,7 +200,7 @@ func TestPollOnceSummarizesAfterSessionGoesIdle(t *testing.T) {
 	if err := d.PollOnce(context.Background(), base); err != nil {
 		t.Fatalf("first PollOnce: %v", err)
 	}
-	if err := d.PollOnce(context.Background(), base.Add(10*time.Second)); err != nil {
+	if err := d.PollOnce(context.Background(), base.Add(idleWindow+time.Second)); err != nil {
 		t.Fatalf("second PollOnce: %v", err)
 	}
 
@@ -530,7 +530,7 @@ func TestPollOnceRetriesSummarizationAfterTransientFailure(t *testing.T) {
 	}
 
 	// Session goes idle: this tick's summarization attempt fails.
-	if err := d.PollOnce(context.Background(), base.Add(10*time.Second)); err != nil {
+	if err := d.PollOnce(context.Background(), base.Add(idleWindow+time.Second)); err != nil {
 		t.Fatalf("second PollOnce (failing summarize): %v", err)
 	}
 	summaries, err := store.RecentSummaries(wingID, 10)
@@ -543,7 +543,7 @@ func TestPollOnceRetriesSummarizationAfterTransientFailure(t *testing.T) {
 
 	// The very next poll tick (not a whole new idle window) must retry the
 	// same session rather than having dropped it permanently.
-	if err := d.PollOnce(context.Background(), base.Add(13*time.Second)); err != nil {
+	if err := d.PollOnce(context.Background(), base.Add(idleWindow+4*time.Second)); err != nil {
 		t.Fatalf("third PollOnce (retry): %v", err)
 	}
 	summaries, err = store.RecentSummaries(wingID, 10)
@@ -746,7 +746,7 @@ func TestPollOnce_SynthesizesDigestOnDebounce(t *testing.T) {
 	if err := d.PollOnce(context.Background(), base); err != nil {
 		t.Fatalf("first PollOnce: %v", err)
 	}
-	if err := d.PollOnce(context.Background(), base.Add(10*time.Second)); err != nil {
+	if err := d.PollOnce(context.Background(), base.Add(idleWindow+time.Second)); err != nil {
 		t.Fatalf("second PollOnce: %v", err)
 	}
 

@@ -14,11 +14,9 @@ import (
 	"github.com/haminh7036/memremark/internal/summarizer"
 )
 
-// idleWindow is how long a session must go quiet before it's summarized.
-//
-// ponytail: fixed and untuned -- see spec §10. Adjust based on real usage
-// once this is running day to day.
-const idleWindow = 5 * time.Second
+// idleWindow is how long a session (or workspace) must go quiet before it's summarized.
+// Increased to 45s to avoid aggressive continuous CLI spawning on short pauses.
+const idleWindow = 45 * time.Second
 
 type dbMeta struct {
 	modTime time.Time
@@ -36,6 +34,7 @@ type Daemon struct {
 	pauseFilePath  string
 	activeCancelMu sync.Mutex
 	activeCancel   func()
+	cliMutex       sync.Mutex
 
 	claudeProjectsRoot string
 	claudeTailer       *claudecode.Tailer
