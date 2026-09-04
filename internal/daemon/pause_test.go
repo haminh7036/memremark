@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -114,3 +115,49 @@ func TestDefaultPauseFilePath_EnvOverride(t *testing.T) {
 		t.Fatalf("expected %q, got %q", customPath, got)
 	}
 }
+
+func TestDaemonStartPauseWatcher(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "test.db")
+	store, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("storage.Open failed: %v", err)
+	}
+	defer store.Close()
+
+	d := New(store, tempDir, filepath.Join(tempDir, "conv.db"), nil, nil, locale.TargetLanguage{Code: "en"})
+	pauseFile := filepath.Join(tempDir, "paused")
+	d.SetPauseFile(pauseFile)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	d.StartPauseWatcher(ctx, 10*time.Millisecond)
+
+	var cancelled atomic.Bool
+	d.RegisterActiveCancel(func() {
+		cancelled.Store(true)
+	})
+
+	// Simulate external CLI creating the pause file directly on disk
+	f, err := os.Create(pauseFile)
+	if err != nil {
+		t.Fatalf("create pause file: %v", err)
+	}
+	_ = f.Close()
+
+	// Wait up to 500ms for the watcher to trigger active cancel
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if cancelled.Load() {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if !cancelled.Load() {
+		t.Fatal("expected StartPauseWatcher to trigger active cancel when pause file is created externally")
+	}
+}
+
+

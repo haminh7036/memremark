@@ -492,6 +492,8 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	d.StartPauseWatcher(ctx, 500*time.Millisecond)
+
 	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
 

@@ -1,8 +1,10 @@
 package daemon
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // DefaultPauseFilePath returns $HOME/.memremark/paused.
@@ -86,3 +88,26 @@ func (d *Daemon) CancelActive() {
 		cancel()
 	}
 }
+
+// StartPauseWatcher runs a background loop checking if the daemon has been
+// paused externally (e.g. by `memremarkd pause`), cancelling in-flight operations.
+func (d *Daemon) StartPauseWatcher(ctx context.Context, interval time.Duration) {
+	if interval <= 0 {
+		interval = 500 * time.Millisecond
+	}
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if d.IsPaused() {
+					d.CancelActive()
+				}
+			}
+		}
+	}()
+}
+

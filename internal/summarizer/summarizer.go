@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -76,7 +77,11 @@ func (inv ClaudeCodeInvoker) Invoke(ctx context.Context, prompt string, opts ...
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
 		if cmd.Process != nil && cmd.Process.Pid > 0 {
-			return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			if errors.Is(err, syscall.ESRCH) {
+				return nil
+			}
+			return err
 		}
 		return nil
 	}
@@ -148,7 +153,11 @@ func (inv AntigravityInvoker) Invoke(ctx context.Context, prompt string, opts ..
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
 		if cmd.Process != nil && cmd.Process.Pid > 0 {
-			return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			if errors.Is(err, syscall.ESRCH) {
+				return nil
+			}
+			return err
 		}
 		return nil
 	}
