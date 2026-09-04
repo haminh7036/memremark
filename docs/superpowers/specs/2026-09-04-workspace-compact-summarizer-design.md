@@ -325,3 +325,37 @@ func (d *Daemon) summarizeWing(ctx context.Context, wingID int64, now time.Time)
 3. **End-to-End CLI Verification:**
    - Run `memremarkd` in a live workspace with `agy` configured.
    - Verify process tree (`ps aux | grep -E "(agy|node|gopls)"`) during normal operation and upon emergency stop to confirm zero orphaned processes.
+
+---
+
+## 8. Phased Implementation Roadmap
+
+To ensure engineering rigor, minimize regression risk, and deliver immediate relief from RAM exhaustion, the implementation is decomposed into three sequential phases:
+
+### Phase 1: Process Isolation, Concurrency Control & Emergency Pause ("Immediate RAM & Process Relief")
+* **Goal:** Immediately prevent daemon-induced memory exhaustion, eliminate orphaned child processes, and provide instant pause control without requiring `systemctl`.
+* **Scope & Deliverables:**
+  1. **Process Group Isolation:** Set `cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}` for CLI invokers (`AntigravityInvoker`, `ClaudeCodeInvoker`) and terminate the entire process group (`syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)`) upon context cancellation or timeout.
+  2. **Emergency Pause Switch:** Implement detection of `$HOME/.memremark/paused` (supported via `memremark pause` and `memremark resume` CLI commands). When paused, in-flight CLI processes are immediately SIGKILL'd, and polling loops sleep without invoking LLMs.
+  3. **Concurrency Limiter & Debounce Calibration:** Introduce a global `cliMutex` (concurrency = 1) across the daemon so CLI processes cannot run concurrently. Increase default `idleWindow` to 45s.
+* **Verification:** Unit and integration tests confirming process group termination on cancel, pause flag honoring, and serialization of CLI execution.
+
+### Phase 2: Workspace-Level Batching & One-Shot Distillation ("Core Architecture")
+* **Goal:** Group observations by workspace instead of individual sessions, distill memories in a single bounded CLI call, and produce structured JSON array output.
+* **Scope & Deliverables:**
+  1. **Observation Pre-Compaction:** Implement `compactAndBudget` to clean ANSI codes, truncate long tool outputs (>800 chars to 400 head/tail), and enforce a hard payload cap of $\le$ 70 KB.
+  2. **Workspace-Keyed Tracking:** Update `Tracker` to key on `wing_id`.
+  3. **Storage Aggregation:** Implement `Store.UnsummarizedVerbatimByWing(wingID)` to query verbatim records across all sessions for a wing.
+  4. **One-Shot Distillation:** Replace `summarizeSession` and internal batching loops with `summarizeWing`. Eliminate standalone session digest calls in favor of pure `[]SummaryItem` JSON array output.
+  5. **Atomic Prune & Reclaim:** Delete summarized verbatim IDs and trigger incremental vacuum in the same cycle.
+* **Verification:** Integration tests verifying multi-session aggregation, payload boundary enforcement, and atomic pruning.
+
+### Phase 3: Daily Token Budgeting & Circuit Breaker ("Long-Term Quota Protection")
+* **Goal:** Prevent runaway token spend and respect daily usage limits per provider/model.
+* **Scope & Deliverables:**
+  1. **Token Usage Storage:** Add `token_usage` table in SQLite tracking daily prompt, completion, and total tokens.
+  2. **Configurable Limits:** Add `daily_token_limits` in `config.json` supporting provider/model granular limits.
+  3. **Token Accounting & Heuristics:** Parse API usage metadata or calculate payload-based token estimation for CLI calls.
+  4. **Circuit Breaker:** Check daily usage before invoking LLM; skip invocations when limit is reached, preserving verbatim drawers until midnight reset.
+* **Verification:** Unit tests for quota calculation, limit tripping, and midnight rollover.
+
