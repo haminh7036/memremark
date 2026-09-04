@@ -49,23 +49,28 @@ func TestCLIConcurrencySerialization(t *testing.T) {
 	inv := &blockingInvoker{}
 	d := New(store, tempDir, filepath.Join(tempDir, "conv.db"), inv, inv, locale.TargetLanguage{Code: "en"})
 
-	// Record observations for two sessions in the same wing
+	// Record observations for two wings
 	now := time.Now()
-	_ = d.recordObservation(observation.Observation{WingPath: tempDir, SessionID: "sess-1", ToolName: "test", Content: "c1", Timestamp: now}, inv, now)
-	_ = d.recordObservation(observation.Observation{WingPath: tempDir, SessionID: "sess-2", ToolName: "test", Content: "c2", Timestamp: now}, inv, now)
+	wing1Dir := filepath.Join(tempDir, "proj1")
+	wing2Dir := filepath.Join(tempDir, "proj2")
+	_ = d.recordObservation(observation.Observation{WingPath: wing1Dir, SessionID: "sess-1", ToolName: "test", Content: "c1", Timestamp: now}, inv, now)
+	_ = d.recordObservation(observation.Observation{WingPath: wing2Dir, SessionID: "sess-2", ToolName: "test", Content: "c2", Timestamp: now}, inv, now)
+
+	wingID1, _ := store.GetOrCreateWing(wing1Dir)
+	wingID2, _ := store.GetOrCreateWing(wing2Dir)
 
 	// Run summarize concurrently
 	errCh := make(chan error, 2)
 	go func() {
-		errCh <- d.summarizeSession(context.Background(), "sess-1", now.Add(time.Second))
+		errCh <- d.summarizeWing(context.Background(), wingID1, now.Add(time.Second))
 	}()
 	go func() {
-		errCh <- d.summarizeSession(context.Background(), "sess-2", now.Add(time.Second))
+		errCh <- d.summarizeWing(context.Background(), wingID2, now.Add(time.Second))
 	}()
 
 	for i := 0; i < 2; i++ {
 		if err := <-errCh; err != nil {
-			t.Fatalf("summarizeSession failed: %v", err)
+			t.Fatalf("summarizeWing failed: %v", err)
 		}
 	}
 

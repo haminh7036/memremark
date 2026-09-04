@@ -138,8 +138,8 @@ func (d *Daemon) Warmup() error {
 // on subsequent ticks.
 const maxSessionsPerTick = 2
 
-// PollOnce runs one capture pass over both CLIs' transcripts, then
-// triggers summarization for any session that has gone idle.
+// PollOnce runs one capture pass over transcripts, then triggers summarization
+// for any workspace that has gone idle.
 func (d *Daemon) PollOnce(ctx context.Context, now time.Time) error {
 	if d.IsPaused() {
 		return nil
@@ -153,59 +153,26 @@ func (d *Daemon) PollOnce(ctx context.Context, now time.Time) error {
 	}
 
 	processed := 0
-	for _, dueKey := range d.Tracker.Due(now, idleWindow) {
+	for _, wingKey := range d.Tracker.Due(now, idleWindow) {
 		if ctx.Err() != nil {
 			break
 		}
 		if processed >= maxSessionsPerTick {
 			break
 		}
-
-		if wingID, err := strconv.ParseInt(dueKey, 10, 64); err == nil {
-			sessions := make(map[string]bool)
-			for sID, wID := range d.sessionWing {
-				if wID == wingID {
-					sessions[sID] = true
-				}
-			}
-			if refs, err := d.Store.OrphanedVerbatimSessions(); err == nil {
-				for _, ref := range refs {
-					if ref.WingID == wingID {
-						d.sessionWing[ref.SessionID] = wingID
-						d.sessionInvoker[ref.SessionID] = d.claudeInvoker
-						sessions[ref.SessionID] = true
-					}
-				}
-			}
-			failed := false
-			for sID := range sessions {
-				if err := d.summarizeSession(ctx, sID, now); err != nil {
-					if ctx.Err() != nil {
-						failed = true
-						break
-					}
-					log.Printf("daemon: summarize session %s failed: %v", sID, err)
-					failed = true
-					break
-				}
-			}
-			if failed {
-				continue
-			}
-			d.Tracker.Consume(dueKey)
-			processed++
+		wingID, err := strconv.ParseInt(wingKey, 10, 64)
+		if err != nil {
+			d.Tracker.Consume(wingKey)
 			continue
 		}
-
-		if err := d.summarizeSession(ctx, dueKey, now); err != nil {
+		if err := d.summarizeWing(ctx, wingID, now); err != nil {
 			if ctx.Err() != nil {
 				break
 			}
-			// Do NOT consume on failure -- retry next tick.
-			log.Printf("daemon: summarize session %s failed: %v", dueKey, err)
+			log.Printf("daemon: summarize wing %d failed: %v", wingID, err)
 			continue
 		}
-		d.Tracker.Consume(dueKey)
+		d.Tracker.Consume(wingKey)
 		processed++
 	}
 	return nil

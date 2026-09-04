@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -50,46 +51,66 @@ func (r *recordingInvoker) Invoke(ctx context.Context, prompt string, opts ...su
 	return r.reply, nil
 }
 
-func TestTakeBatchStaysWithinByteBudget(t *testing.T) {
-	verbatim := []storage.Drawer{
-		{Content: "aaaa"}, // 4 bytes
-		{Content: "bbbb"}, // 4 bytes, running total 8
-		{Content: "cccc"}, // 4 bytes, running total would be 12 > budget of 10
-		{Content: "dddd"},
+type stubInvokerCount struct {
+	reply     string
+	callCount int
+}
+
+func (s *stubInvokerCount) Invoke(ctx context.Context, prompt string, opts ...summarizer.InvokerOptions) (string, error) {
+	s.callCount++
+	return s.reply, nil
+}
+
+func TestSummarizeWing_OneShotDistillation(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "test.db")
+	store, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer store.Close()
+
+	inv := &stubInvokerCount{
+		reply: `[{"hall":"fact","content":"Unified workspace fact","narrative":"Distilled across sessions"}]`,
+	}
+	d := New(store, tempDir, filepath.Join(tempDir, "conv.db"), inv, inv, locale.TargetLanguage{Code: "en"})
+
+	wingID, _ := store.GetOrCreateWing(tempDir)
+	now := time.Now()
+
+	// 2 observations across 2 sessions
+	_ = store.InsertVerbatimDrawer(wingID, "sess-1", "bash", "echo 1", now)
+	_ = store.InsertVerbatimDrawer(wingID, "sess-2", "edit", "echo 2", now.Add(time.Second))
+
+	if err := d.summarizeWing(context.Background(), wingID, now.Add(time.Minute)); err != nil {
+		t.Fatalf("summarizeWing failed: %v", err)
 	}
 
-	batch := takeBatch(verbatim, 10)
-	if len(batch) != 2 {
-		t.Fatalf("expected first 2 rows (8 bytes <= budget 10), got %d rows", len(batch))
+	// Must have invoked LLM exactly ONCE
+	if inv.callCount != 1 {
+		t.Fatalf("expected exactly 1 invoker call, got %d", inv.callCount)
+	}
+
+	// Verify summary drawer was written
+	summaries, err := store.RecentSummaries(wingID, 10)
+	if err != nil || len(summaries) != 1 {
+		t.Fatalf("expected 1 summary drawer, got %d (err: %v)", len(summaries), err)
+	}
+	if summaries[0].Content != "Unified workspace fact" {
+		t.Fatalf("unexpected summary content: %s", summaries[0].Content)
+	}
+
+	// Verify verbatim was pruned
+	remaining, err := store.UnsummarizedVerbatimByWing(wingID, 10)
+	if err != nil || len(remaining) != 0 {
+		t.Fatalf("expected 0 remaining verbatim, got %d", len(remaining))
 	}
 }
 
-func TestTakeBatchAlwaysIncludesAtLeastOneRowEvenIfOversized(t *testing.T) {
-	verbatim := []storage.Drawer{
-		{Content: strings.Repeat("x", 100)}, // a single row bigger than the budget
-		{Content: "y"},
-	}
-
-	batch := takeBatch(verbatim, 10)
-	if len(batch) != 1 {
-		t.Fatalf("expected exactly the first (oversized) row alone, got %d rows", len(batch))
-	}
-}
-
-func TestTakeBatchOnEmptyInputReturnsNil(t *testing.T) {
-	if got := takeBatch(nil, 10); got != nil {
-		t.Fatalf("expected nil for empty input, got %v", got)
-	}
-}
-
-// TestSummarizeSessionChunksLargeBacklogAcrossMultipleInvokerCalls is the
-// regression test for the production incident: a session whose verbatim
-// backlog never summarized successfully grew to 1315 rows / ~3.5MB and
-// blew past the OS's ARG_MAX (2MB) on every `claude -p <prompt>` attempt,
-// forever, because summarizeSession passed the *entire* backlog to one
-// Invoke call with no size cap. This confirms a large backlog is now
-// drained across several bounded Invoke calls instead of one unbounded one.
-func TestSummarizeSessionChunksLargeBacklogAcrossMultipleInvokerCalls(t *testing.T) {
+// TestSummarizeWing_BoundsLargeBacklogToOneInvocation verifies that a large backlog
+// exceeding the 70 KB budget triggers exactly ONE invoker call (One-Shot distillation),
+// prunes only the batch that was distilled, and leaves the remaining rows unsummarized.
+func TestSummarizeWing_BoundsLargeBacklogToOneInvocation(t *testing.T) {
 	store, err := storage.Open(tempDBPath(t))
 	if err != nil {
 		t.Fatalf("storage.Open: %v", err)
@@ -101,47 +122,48 @@ func TestSummarizeSessionChunksLargeBacklogAcrossMultipleInvokerCalls(t *testing
 		t.Fatalf("GetOrCreateWing: %v", err)
 	}
 
-	const rowContentBytes = 200_000
-	const numRows = 6 // 6 * 200_000 = 1,200,000 bytes total, comfortably over a small test budget
+	const numRows = 100 // 100 * ~832 bytes = ~83.2 KB > 70 KB budget
 	base := time.Now().Add(-time.Hour)
 	for i := 0; i < numRows; i++ {
-		content := strings.Repeat("x", rowContentBytes)
+		content := strings.Repeat("x", 1000)
 		if err := store.InsertVerbatimDrawer(wingID, "sess-1", "Bash", content, base.Add(time.Duration(i)*time.Second)); err != nil {
 			t.Fatalf("InsertVerbatimDrawer %d: %v", i, err)
 		}
 	}
 
-	invoker := &recordingInvoker{reply: `[{"hall":"fact","content":"chunk summarized"}]`}
+	invoker := &stubInvokerCount{reply: `[{"hall":"fact","content":"chunk summarized"}]`}
 	d := New(store, t.TempDir(), t.TempDir()+"/conversation_summaries.db", invoker, invoker)
-	d.sessionWing["sess-1"] = wingID
-	d.sessionInvoker["sess-1"] = invoker
+	d.wingInvoker[wingID] = invoker
 
-	// Use a small test-scale byte budget (500_000) so this test runs fast
-	// without allocating a real multi-megabyte string, while still proving
-	// the same chunking logic production uses at its real budget.
-	if err := d.summarizeSessionWithBatchSize(context.Background(), "sess-1", time.Now(), 500_000); err != nil {
-		t.Fatalf("summarizeSessionWithBatchSize: %v", err)
+	if err := d.summarizeWing(context.Background(), wingID, time.Now()); err != nil {
+		t.Fatalf("summarizeWing: %v", err)
 	}
 
-	if len(invoker.batches) < 2 {
-		t.Fatalf("expected the 1.2MB backlog to be split across multiple Invoke calls at a 500KB budget, got %d call(s)", len(invoker.batches))
+	// Must be exactly one invocation (One-Shot distillation)
+	if invoker.callCount != 1 {
+		t.Fatalf("expected exactly 1 invoker call, got %d", invoker.callCount)
 	}
 
-	summaries, err := store.RecentSummaries(wingID, 100)
+	summaries, err := store.RecentSummaries(wingID, 10)
 	if err != nil {
 		t.Fatalf("RecentSummaries: %v", err)
 	}
-	if len(summaries) != len(invoker.batches) {
-		t.Fatalf("expected one summary drawer per Invoke call (%d), got %d summary drawers", len(invoker.batches), len(summaries))
+	if len(summaries) != 1 {
+		t.Fatalf("expected 1 summary drawer from the single invocation, got %d", len(summaries))
+	}
+
+	remaining, err := store.UnsummarizedVerbatimByWing(wingID, 200)
+	if err != nil {
+		t.Fatalf("UnsummarizedVerbatimByWing: %v", err)
+	}
+	if len(remaining) == 0 || len(remaining) >= numRows {
+		t.Fatalf("expected some rows to remain unsummarized, got %d remaining out of %d", len(remaining), numRows)
 	}
 }
 
-// TestSummarizeSessionPrunesVerbatimAfterSuccessfulSummarize is the
-// regression test for the DB-bloat fix: verbatim rows have done their job
-// once they're distilled into a summary drawer, so they should be deleted
-// rather than accumulating forever (production incident: 101MB DB, 89.9MB
-// of it verbatim rows never cleaned up).
-func TestSummarizeSessionPrunesVerbatimAfterSuccessfulSummarize(t *testing.T) {
+// TestSummarizeWingPrunesVerbatimAfterSuccessfulSummarize verifies that
+// verbatim rows are deleted once distilled into summary drawers.
+func TestSummarizeWingPrunesVerbatimAfterSuccessfulSummarize(t *testing.T) {
 	store, err := storage.Open(tempDBPath(t))
 	if err != nil {
 		t.Fatalf("storage.Open: %v", err)
@@ -160,16 +182,15 @@ func TestSummarizeSessionPrunesVerbatimAfterSuccessfulSummarize(t *testing.T) {
 
 	invoker := stubInvoker{reply: `[{"hall":"fact","content":"summarized"}]`}
 	d := New(store, t.TempDir(), t.TempDir()+"/conversation_summaries.db", invoker, invoker)
-	d.sessionWing["sess-1"] = wingID
-	d.sessionInvoker["sess-1"] = invoker
+	d.wingInvoker[wingID] = invoker
 
-	if err := d.summarizeSession(context.Background(), "sess-1", now); err != nil {
-		t.Fatalf("summarizeSession: %v", err)
+	if err := d.summarizeWing(context.Background(), wingID, now); err != nil {
+		t.Fatalf("summarizeWing: %v", err)
 	}
 
-	remaining, err := store.VerbatimSince(wingID, "sess-1", time.Unix(0, 0))
+	remaining, err := store.UnsummarizedVerbatimByWing(wingID, 10)
 	if err != nil {
-		t.Fatalf("VerbatimSince: %v", err)
+		t.Fatalf("UnsummarizedVerbatimByWing: %v", err)
 	}
 	if len(remaining) != 0 {
 		t.Fatalf("expected the summarized verbatim row to be pruned, %d row(s) remain", len(remaining))
@@ -184,10 +205,10 @@ func TestSummarizeSessionPrunesVerbatimAfterSuccessfulSummarize(t *testing.T) {
 	}
 }
 
-// TestSummarizeSessionKeepsVerbatimWhenInvokerFails ensures a failed
+// TestSummarizeWingKeepsVerbatimWhenInvokerFails ensures a failed
 // summarize call leaves the batch untouched -- pruning must only happen
 // after the verbatim rows have actually been distilled, never before.
-func TestSummarizeSessionKeepsVerbatimWhenInvokerFails(t *testing.T) {
+func TestSummarizeWingKeepsVerbatimWhenInvokerFails(t *testing.T) {
 	store, err := storage.Open(tempDBPath(t))
 	if err != nil {
 		t.Fatalf("storage.Open: %v", err)
@@ -206,16 +227,15 @@ func TestSummarizeSessionKeepsVerbatimWhenInvokerFails(t *testing.T) {
 
 	invoker := stubInvoker{err: errors.New("invoker unavailable")}
 	d := New(store, t.TempDir(), t.TempDir()+"/conversation_summaries.db", invoker, invoker)
-	d.sessionWing["sess-1"] = wingID
-	d.sessionInvoker["sess-1"] = invoker
+	d.wingInvoker[wingID] = invoker
 
-	if err := d.summarizeSession(context.Background(), "sess-1", now); err == nil {
-		t.Fatalf("expected summarizeSession to return the invoker error")
+	if err := d.summarizeWing(context.Background(), wingID, now); err == nil {
+		t.Fatalf("expected summarizeWing to return the invoker error")
 	}
 
-	remaining, err := store.VerbatimSince(wingID, "sess-1", time.Unix(0, 0))
+	remaining, err := store.UnsummarizedVerbatimByWing(wingID, 10)
 	if err != nil {
-		t.Fatalf("VerbatimSince: %v", err)
+		t.Fatalf("UnsummarizedVerbatimByWing: %v", err)
 	}
 	if len(remaining) != 1 {
 		t.Fatalf("expected the unsummarized verbatim row to survive a failed summarize, %d row(s) remain", len(remaining))
@@ -227,7 +247,7 @@ func tempDBPath(t *testing.T) string {
 	return t.TempDir() + "/memremark.db"
 }
 
-func TestDaemon_SummarizeSession_FallbackIntegration(t *testing.T) {
+func TestDaemon_SummarizeWing_FallbackIntegration(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "memremark.db")
 	store, err := storage.Open(dbPath)
 	if err != nil {
@@ -262,17 +282,17 @@ func TestDaemon_SummarizeSession_FallbackIntegration(t *testing.T) {
 		t.Fatalf("recordObservation: %v", err)
 	}
 
-	if err := d.summarizeSession(context.Background(), obs.SessionID, now); err != nil {
-		t.Fatalf("summarizeSession: %v", err)
+	wingID, err := store.GetOrCreateWing("/test/ws")
+	if err != nil {
+		t.Fatalf("GetOrCreateWing: %v", err)
+	}
+
+	if err := d.summarizeWing(context.Background(), wingID, now); err != nil {
+		t.Fatalf("summarizeWing: %v", err)
 	}
 
 	if !fallbackTriggered {
 		t.Fatalf("expected fallback callback to have triggered")
-	}
-
-	wingID, err := store.GetOrCreateWing("/test/ws")
-	if err != nil {
-		t.Fatalf("GetOrCreateWing: %v", err)
 	}
 
 	drawers, err := store.RecentSummaries(wingID, 10)
@@ -324,9 +344,9 @@ func TestDaemon_Warmup_RecoversOrphanedSessionAcrossRestart(t *testing.T) {
 		t.Fatalf("PollOnce: %v", err)
 	}
 
-	remaining, err := store.VerbatimSince(wingID, "sess-orphan", time.Unix(0, 0))
+	remaining, err := store.UnsummarizedVerbatimByWing(wingID, 10)
 	if err != nil {
-		t.Fatalf("VerbatimSince: %v", err)
+		t.Fatalf("UnsummarizedVerbatimByWing: %v", err)
 	}
 	if len(remaining) != 0 {
 		t.Fatalf("expected orphaned verbatim to be pruned after Warmup+PollOnce, %d row(s) remain", len(remaining))
@@ -368,9 +388,9 @@ func TestDaemon_Warmup_DoesNotClobberLiveSessionDebounceClock(t *testing.T) {
 
 	// Simulate this process having JUST recorded an observation for
 	// sess-live (i.e. it's actively being tracked, mid-conversation).
-	d.sessionWing["sess-live"] = wingID
-	d.sessionInvoker["sess-live"] = invoker
-	d.Tracker.Touch("sess-live", now)
+	wingKey := strconv.FormatInt(wingID, 10)
+	d.wingInvoker[wingID] = invoker
+	d.Tracker.Touch(wingKey, now)
 
 	if err := d.Warmup(); err != nil {
 		t.Fatalf("Warmup: %v", err)
@@ -383,16 +403,16 @@ func TestDaemon_Warmup_DoesNotClobberLiveSessionDebounceClock(t *testing.T) {
 		t.Fatalf("PollOnce: %v", err)
 	}
 
-	remaining, err := store.VerbatimSince(wingID, "sess-live", time.Unix(0, 0))
+	remaining, err := store.UnsummarizedVerbatimByWing(wingID, 10)
 	if err != nil {
-		t.Fatalf("VerbatimSince: %v", err)
+		t.Fatalf("UnsummarizedVerbatimByWing: %v", err)
 	}
 	if len(remaining) != 1 {
 		t.Fatalf("expected the live session's verbatim row to survive (not due yet), %d row(s) remain", len(remaining))
 	}
 }
 
-func TestDaemon_SummarizeSession_PassesDeterministicSessionIDAndWorkDir(t *testing.T) {
+func TestDaemon_SummarizeWing_PassesDeterministicSessionIDAndWorkDir(t *testing.T) {
 	store, err := storage.Open(tempDBPath(t))
 	if err != nil {
 		t.Fatalf("storage.Open: %v", err)
@@ -412,11 +432,10 @@ func TestDaemon_SummarizeSession_PassesDeterministicSessionIDAndWorkDir(t *testi
 
 	invoker := &recordingInvoker{reply: `[{"hall":"fact","content":"summarized"}]`}
 	d := New(store, t.TempDir(), t.TempDir()+"/conversation_summaries.db", invoker, invoker)
-	d.sessionWing["sess-det-1"] = wingID
-	d.sessionInvoker["sess-det-1"] = invoker
+	d.wingInvoker[wingID] = invoker
 
-	if err := d.summarizeSession(context.Background(), "sess-det-1", now); err != nil {
-		t.Fatalf("summarizeSession: %v", err)
+	if err := d.summarizeWing(context.Background(), wingID, now); err != nil {
+		t.Fatalf("summarizeWing: %v", err)
 	}
 
 	if len(invoker.opts) == 0 {
@@ -431,84 +450,6 @@ func TestDaemon_SummarizeSession_PassesDeterministicSessionIDAndWorkDir(t *testi
 		if opt.WorkDir != projectPath {
 			t.Errorf("call %d: expected WorkDir %q, got %q", i, projectPath, opt.WorkDir)
 		}
-	}
-}
-
-func TestDaemon_SummarizeSession_CreatesSessionDigest(t *testing.T) {
-	store, cleanup := setupTestStore(t)
-	defer cleanup()
-
-	wingID, _ := store.GetOrCreateWing("/home/user/proj")
-	sessionID := "test-session-digest"
-
-	digestJSON := `{"request":"Fix bug","investigated":"Logs","learned":"Root cause found","completed":"Patched logic","next_steps":"Deploy","notes":""}`
-	summaryJSON := `[{"hall":"fact","content":"Bug is fixed","narrative":"Fixed bug by checking null pointers"}]`
-
-	invoker := &dualStubInvoker{
-		summaryJSON: summaryJSON,
-		digestJSON:  digestJSON,
-	}
-
-	d := New(store, t.TempDir(), "", invoker, invoker, locale.TargetLanguage{Code: "en", Name: "English"})
-	d.sessionWing[sessionID] = wingID
-	d.sessionInvoker[sessionID] = invoker
-
-	now := time.Now()
-	_ = store.InsertVerbatimDrawer(wingID, sessionID, "edit", "fixed nil pointer", now)
-
-	if err := d.summarizeSession(context.Background(), sessionID, now); err != nil {
-		t.Fatalf("summarizeSession failed: %v", err)
-	}
-
-	digest, err := store.GetSessionDigest(sessionID)
-	if err != nil {
-		t.Fatalf("GetSessionDigest failed: %v", err)
-	}
-	if digest == nil {
-		t.Fatalf("expected session digest to be created, got nil")
-	}
-	if digest.Request != "Fix bug" || digest.Completed != "Patched logic" {
-		t.Errorf("unexpected digest fields: %+v", digest)
-	}
-}
-
-func TestDaemon_SummarizeSession_DigestSynthesisErrorNonBlocking(t *testing.T) {
-	store, cleanup := setupTestStore(t)
-	defer cleanup()
-
-	wingID, _ := store.GetOrCreateWing("/home/user/proj")
-	sessionID := "test-session-digest-err"
-
-	invoker := &dualStubInvoker{
-		summaryJSON: `[{"hall":"fact","content":"Summary works","narrative":"Narrative works"}]`,
-		digestErr:   errors.New("LLM error on digest synthesis"),
-	}
-
-	d := New(store, t.TempDir(), "", invoker, invoker, locale.TargetLanguage{Code: "en", Name: "English"})
-	d.sessionWing[sessionID] = wingID
-	d.sessionInvoker[sessionID] = invoker
-
-	now := time.Now()
-	_ = store.InsertVerbatimDrawer(wingID, sessionID, "edit", "some changes", now)
-
-	if err := d.summarizeSession(context.Background(), sessionID, now); err != nil {
-		t.Fatalf("summarizeSession failed unexpectedly: %v", err)
-	}
-
-	summaries, err := store.RecentSummaries(wingID, 10)
-	if err != nil {
-		t.Fatalf("RecentSummaries failed: %v", err)
-	}
-	if len(summaries) != 1 || summaries[0].Content != "Summary works" {
-		t.Errorf("expected 1 summary drawer, got %+v", summaries)
-	}
-
-	digest, err := store.GetSessionDigest(sessionID)
-	if err != nil {
-		t.Fatalf("GetSessionDigest failed: %v", err)
-	}
-	if digest != nil {
-		t.Errorf("expected no digest when synthesis fails, got %+v", digest)
 	}
 }
 

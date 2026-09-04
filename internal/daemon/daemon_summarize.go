@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"log"
 	"strconv"
 	"time"
 
@@ -37,19 +36,7 @@ func (d *Daemon) recordObservation(obs observation.Observation, invoker summariz
 	return nil
 }
 
-// maxSummarizeBatchBytes bounds how much verbatim content one Summarize call
-// may cover.
-//
-// agy -p passes the prompt as a CLI argv argument.  Linux's per-argument
-// MAX_ARG_STRLEN is 32 pages = 131,072 bytes.  We cap at 100,000 bytes so the
-// full prompt (system prompt + observations) stays safely below this limit.
-const maxSummarizeBatchBytes = 100_000
-
-func (d *Daemon) summarizeSession(ctx context.Context, sessionID string, now time.Time) error {
-	return d.summarizeSessionWithBatchSize(ctx, sessionID, now, maxSummarizeBatchBytes)
-}
-
-func (d *Daemon) summarizeSessionWithBatchSize(ctx context.Context, sessionID string, now time.Time, maxBatchBytes int) error {
+func (d *Daemon) summarizeWing(ctx context.Context, wingID int64, now time.Time) error {
 	d.cliMutex.Lock()
 	defer d.cliMutex.Unlock()
 
@@ -57,83 +44,62 @@ func (d *Daemon) summarizeSessionWithBatchSize(ctx context.Context, sessionID st
 		return nil
 	}
 
-	wingID, ok := d.sessionWing[sessionID]
-	if !ok {
-		return nil // never recorded an observation for this session; nothing to summarize
-	}
-	invoker := d.sessionInvoker[sessionID]
-
-	since, hasPrev, err := d.Store.LastSummaryCoversTo(wingID, sessionID)
-	if err != nil {
-		return err
-	}
-	if !hasPrev {
-		since = time.Unix(0, 0)
-	}
-
-	verbatim, err := d.Store.VerbatimSince(wingID, sessionID, since)
-	if err != nil {
+	wing, err := d.Store.GetWingByID(wingID)
+	if err != nil || wing == nil {
 		return err
 	}
 
-	var opts summarizer.InvokerOptions
-	if d.Store != nil {
-		if wing, err := d.Store.GetWingByID(wingID); err == nil && wing != nil {
-			opts = summarizer.InvokerOptions{
-				SessionID: storage.WingSummarySessionID(wing.Path),
-				WorkDir:   wing.Path,
-			}
-		}
+	verbatim, err := d.Store.UnsummarizedVerbatimByWing(wingID, 500)
+	if err != nil || len(verbatim) == 0 {
+		return err
 	}
 
-	pruned := false
-	for len(verbatim) > 0 {
-		batch := takeBatch(verbatim, maxBatchBytes)
-		verbatim = verbatim[len(batch):]
-
-		var obs []observation.Observation
-		for _, v := range batch {
-			obs = append(obs, observation.Observation{ToolName: v.ToolName, Content: v.Content})
-		}
-
-		callCtx, cancel := context.WithCancel(ctx)
-		d.RegisterActiveCancel(cancel)
-		items, err := summarizer.SummarizeWithOptions(callCtx, invoker, obs, d.TargetLanguage, opts)
-		d.ClearActiveCancel()
-		cancel()
-		if err != nil {
-			return err
-		}
-
-		coversFrom := batch[0].CreatedAt
-		coversTo := batch[len(batch)-1].CreatedAt
-		for _, item := range items {
-			if err := d.Store.InsertSummaryDrawer(wingID, sessionID, item.Hall, item.Content, item.Narrative, coversFrom, coversTo, now); err != nil {
-				return err
-			}
-		}
-
-		// The batch is now fully distilled into summary drawers above -- the
-		// raw rows have done their job and can go, so the DB doesn't grow
-		// unbounded forever (see incident: 101MB DB, 89.9MB of it verbatim).
-		ids := make([]int64, len(batch))
-		for i, v := range batch {
-			ids[i] = v.ID
-		}
-		if err := d.Store.DeleteDrawers(ids); err != nil {
-			return err
-		}
-		pruned = true
+	batch, obs := summarizer.CompactAndBudget(verbatim, summarizer.MaxWorkspacePromptBytes)
+	if len(batch) == 0 {
+		return nil
 	}
-	if pruned {
-		if err := d.Store.IncrementalVacuum(); err != nil {
+
+	invoker := d.wingInvoker[wingID]
+	if invoker == nil {
+		invoker = d.claudeInvoker
+	}
+	if invoker == nil {
+		invoker = d.antigravityInvoker
+	}
+
+	opts := summarizer.InvokerOptions{
+		SessionID: storage.WingSummarySessionID(wing.Path),
+		WorkDir:   wing.Path,
+	}
+
+	callCtx, cancel := context.WithCancel(ctx)
+	d.RegisterActiveCancel(cancel)
+	items, err := summarizer.SummarizeWithOptions(callCtx, invoker, obs, d.TargetLanguage, opts)
+	d.ClearActiveCancel()
+	cancel()
+	if err != nil {
+		return err
+	}
+
+	coversFrom := batch[0].CreatedAt
+	coversTo := batch[len(batch)-1].CreatedAt
+	summarySessionID := storage.WingSummarySessionID(wing.Path)
+
+	for _, item := range items {
+		if err := d.Store.InsertSummaryDrawer(wingID, summarySessionID, item.Hall, item.Content, item.Narrative, coversFrom, coversTo, now); err != nil {
 			return err
 		}
 	}
-	if err := d.synthesizeSessionDigest(ctx, sessionID, wingID, invoker, now); err != nil {
-		log.Printf("daemon: synthesize session digest for %s: %v", sessionID, err)
+
+	ids := make([]int64, len(batch))
+	for i, v := range batch {
+		ids[i] = v.ID
 	}
-	return nil
+	if err := d.Store.DeleteDrawers(ids); err != nil {
+		return err
+	}
+
+	return d.Store.IncrementalVacuum()
 }
 
 func (d *Daemon) synthesizeSessionDigest(ctx context.Context, sessionID string, wingID int64, invoker summarizer.Invoker, now time.Time) error {
@@ -192,22 +158,3 @@ func (d *Daemon) synthesizeSessionDigest(ctx context.Context, sessionID string, 
 	return d.Store.UpsertSessionDigest(digest)
 }
 
-// takeBatch returns the longest prefix of verbatim whose combined Content
-// length stays within maxBytes, always including at least the first row
-// even if that single row alone exceeds the budget.
-func takeBatch(verbatim []storage.Drawer, maxBytes int) []storage.Drawer {
-	if len(verbatim) == 0 {
-		return nil
-	}
-	total := len(verbatim[0].Content)
-	end := 1
-	for end < len(verbatim) {
-		next := total + len(verbatim[end].Content)
-		if next > maxBytes {
-			break
-		}
-		total = next
-		end++
-	}
-	return verbatim[:end]
-}
